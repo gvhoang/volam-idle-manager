@@ -45,6 +45,7 @@ fun AccountDialog(
     var password by remember { mutableStateOf(accountConfig.password) }
     var autoLoginEnabled by remember { mutableStateOf(accountConfig.autoLoginEnabled) }
     var customUrl by remember { mutableStateOf(accountConfig.customUrl) }
+    var urlError by remember { mutableStateOf<String?>(null) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -110,9 +111,13 @@ fun AccountDialog(
 
                 OutlinedTextField(
                     value = customUrl,
-                    onValueChange = { customUrl = it },
+                    onValueChange = {
+                        customUrl = it
+                        urlError = null
+                    },
                     label = { Text("URL Tùy chỉnh (để trống dùng mặc định)", fontSize = 11.sp) },
                     singleLine = true,
+                    isError = urlError != null,
                     placeholder = { Text("https://volamidle.pages.dev", color = Color(0xFF64748B), fontSize = 11.sp) },
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedBorderColor = Color(0xFF38BDF8),
@@ -124,6 +129,15 @@ fun AccountDialog(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                urlError?.let { message ->
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = message,
+                        color = Color(0xFFF87171),
+                        fontSize = 10.sp
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -163,12 +177,19 @@ fun AccountDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
+                            val trimmedUrl = customUrl.trim()
+                            val error = validateCustomUrl(trimmedUrl)
+                            if (error != null) {
+                                urlError = error
+                                return@Button
+                            }
+                            urlError = null
                             onSave(
                                 accountConfig.copy(
                                     username = username.trim(),
                                     password = password.trim(),
                                     autoLoginEnabled = autoLoginEnabled,
-                                    customUrl = customUrl.trim()
+                                    customUrl = trimmedUrl
                                 )
                             )
                         },
@@ -181,4 +202,29 @@ fun AccountDialog(
             }
         }
     }
+}
+
+/**
+ * Kiểm tra URL tùy chỉnh trước khi lưu.
+ * Trả về null nếu hợp lệ (hoặc để trống = dùng máy chủ mặc định), ngược lại là thông báo lỗi.
+ *
+ * Chỉ chấp nhận http/https tuyệt đối. Không kiểm tra tên miền có tồn tại thật hay không
+ * (việc đó cần mạng) — nhưng chặn được các trường hợp gõ thiếu scheme, gõ sai định dạng,
+ * hoặc dán nhầm một chuỗi không phải URL, vốn là nguyên nhân gây ERR_NAME_NOT_RESOLVED.
+ */
+private fun validateCustomUrl(url: String): String? {
+    if (url.isBlank()) return null
+    val uri = try {
+        android.net.Uri.parse(url)
+    } catch (_: Exception) {
+        return "URL không hợp lệ"
+    }
+    val scheme = uri.scheme?.lowercase()
+    if (scheme != "http" && scheme != "https") {
+        return "URL phải bắt đầu bằng http:// hoặc https://"
+    }
+    if (uri.host.isNullOrBlank()) {
+        return "URL thiếu tên miền (ví dụ: https://volamidle.pages.dev)"
+    }
+    return null
 }

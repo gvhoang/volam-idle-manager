@@ -83,12 +83,23 @@ class GameTabManager(
     private var periodicWatchdogJob: Job? = null
     private var garbageCollectionJob: Job? = null
 
+    // Đếm số lần tự tải lại khi lỗi máy chủ tạm thời, để không lặp vô hạn
+    private val mainFrameRetryCount = IntArray(4) { 0 }
+
+    // Lỗi main-frame gần nhất của từng tab. null = trang hiện tại không có lỗi.
+    // Dùng để onPageFinished biết đây là trang lỗi nội bộ của Chromium, không phải trang thật.
+    private val lastMainFrameError = arrayOfNulls<Int>(4)
+
     companion object {
         // Tên profile WebView được lưu trên đĩa, nên nó quyết định cookie/session của từng tab.
         // Bản cũ đặt tên "Isolated_Cluster_1_Tab_N" cho mọi người dùng chưa từng đổi Cụm
         // (và cả 3 Cụm đều trỏ về cùng một URL, nên "Cụm 1" là mặc định thực tế).
         // Giữ nguyên tiền tố đó để bản nâng cấp không đăng xuất toàn bộ người dùng hiện tại.
         private const val PROFILE_PREFIX = "Isolated_Cluster_1_Tab_"
+
+        // Lỗi tạm thời: thử lại tối đa 3 lần, giãn cách tăng dần 2.5s -> 5s -> 7.5s
+        private const val MAX_MAIN_FRAME_RETRY = 3
+        private const val MAIN_FRAME_RETRY_BASE_MS = 2500L
     }
 
     init {
@@ -148,6 +159,8 @@ class GameTabManager(
         webView.webViewClient = object : WebViewClient() {
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+                // Trang mới bắt đầu tải -> xóa dấu lỗi của lần tải trước
+                lastMainFrameError[tabIndex] = null
                 if (url != "about:blank" && isTabActive[tabIndex]) {
                     updateStatus(tabIndex, "Đang tải trang...")
                 }
@@ -161,28 +174,38 @@ class GameTabManager(
 
                 if (url == null || url == "about:blank") {
                     updateStatus(tabIndex, "Chờ mở tab (Idle)")
-                } else if (isTabActive[tabIndex]) {
+                    return
+                }
+                if (!isTabActive[tabIndex]) return
+
+                // onPageFinished vẫn được gọi cả khi trang lỗi (Chromium hiển thị trang lỗi nội bộ).
+                // Nếu đang trong chuỗi thử lại thì giữ nguyên thông báo lỗi, không ghi đè thành
+                // "Trang đã sẵn sàng" và không reset bộ đếm (nếu reset sẽ thành thử lại vô hạn).
+                val isErrorPage = lastMainFrameError[tabIndex] != null
+                if (!isErrorPage) {
+                    mainFrameRetryCount[tabIndex] = 0
                     updateStatus(tabIndex, "Trang đã sẵn sàng")
-                    if (_isSystemRunning.value) {
-                        val account = prefs.getAccount(tabIndex)
-                        if (account.username.isNotBlank() && account.password.isNotBlank()) {
-                            val script = GameScriptInjector.buildAutoLoginStepScript(
-                                tabIndex = tabIndex,
-                                username = account.username,
-                                password = account.password
-                            )
-                            view?.evaluateJavascript(script, null)
-                            // Chạy bồi thêm ở 350ms và 800ms khi SPA (React/Vue) vừa dựng xong khung Đăng nhập mới
-                            listOf(350L, 800L).forEach { delayMs ->
-                                mainHandler.postDelayed({
-                                    if (_isSystemRunning.value && isTabActive[tabIndex]) {
-                                        val currentStats = _characterStatsList.value.getOrNull(tabIndex)
-                                        if (currentStats?.state == TabLifecycleState.LOGGING_IN) {
-                                            view?.evaluateJavascript(script, null)
-                                        }
+                }
+
+                if (_isSystemRunning.value) {
+                    val account = prefs.getAccount(tabIndex)
+                    if (account.username.isNotBlank() && account.password.isNotBlank()) {
+                        val script = GameScriptInjector.buildAutoLoginStepScript(
+                            tabIndex = tabIndex,
+                            username = account.username,
+                            password = account.password
+                        )
+                        view?.evaluateJavascript(script, null)
+                        // Chạy bồi thêm ở 350ms và 800ms khi SPA (React/Vue) vừa dựng xong khung Đăng nhập mới
+                        listOf(350L, 800L).forEach { delayMs ->
+                            mainHandler.postDelayed({
+                                if (_isSystemRunning.value && isTabActive[tabIndex]) {
+                                    val currentStats = _characterStatsList.value.getOrNull(tabIndex)
+                                    if (currentStats?.state == TabLifecycleState.LOGGING_IN) {
+                                        view?.evaluateJavascript(script, null)
                                     }
-                                }, delayMs)
-                            }
+                                }
+                            }, delayMs)
                         }
                     }
                 }
@@ -203,17 +226,41 @@ class GameTabManager(
                 error: WebResourceError?
             ) {
                 super.onReceivedError(view, request, error)
-                if (request?.isForMainFrame == true && isTabActive[tabIndex]) {
-                    updateStatus(tabIndex, "Đang kết nối lại máy chủ...")
-                    // Tự động kết nối lại sau 2.5 giây khi máy chủ từ chối hoặc mạng gián đoạn
-                    mainHandler.postDelayed({
-                        if (isTabActive[tabIndex] && _isSystemRunning.value) {
-                            val account = prefs.getAccount(tabIndex)
-                            val targetUrl = account.customUrl.ifBlank { PreferencesManager.GAME_URL }
-                            view?.loadUrl(targetUrl)
-                        }
-                    }, 2500)
+                if (request?.isForMainFrame != true || !isTabActive[tabIndex]) return
+
+                val code = error?.errorCode ?: 0
+                lastMainFrameError[tabIndex] = code
+
+                // Lỗi phân giải tên miền là lỗi vĩnh viễn: URL gõ sai hoặc domain không tồn tại.
+                // Thử lại chỉ tốn pin và data vô ích -> dừng hẳn và báo rõ cho người dùng.
+                if (code == WebViewClient.ERROR_HOST_LOOKUP) {
+                    val account = prefs.getAccount(tabIndex)
+                    val badUrl = account.customUrl.ifBlank { PreferencesManager.GAME_URL }
+                    updateStatus(
+                        tabIndex,
+                        "❌ Không tìm thấy máy chủ: $badUrl — kiểm tra lại URL tùy chỉnh"
+                    )
+                    return
                 }
+
+                // Lỗi tạm thời (mạng chập chờn, máy chủ từ chối): thử lại có giãn cách và có giới hạn,
+                // tránh vòng lặp tải lại vô hạn mỗi 2.5 giây khi máy chủ chết hẳn.
+                val attempt = mainFrameRetryCount[tabIndex] + 1
+                if (attempt > MAX_MAIN_FRAME_RETRY) {
+                    updateStatus(tabIndex, "❌ Máy chủ không phản hồi sau $MAX_MAIN_FRAME_RETRY lần thử")
+                    return
+                }
+                mainFrameRetryCount[tabIndex] = attempt
+
+                val delayMs = MAIN_FRAME_RETRY_BASE_MS * attempt
+                updateStatus(tabIndex, "Đang kết nối lại máy chủ... (lần $attempt/$MAX_MAIN_FRAME_RETRY)")
+                mainHandler.postDelayed({
+                    if (isTabActive[tabIndex] && _isSystemRunning.value) {
+                        val account = prefs.getAccount(tabIndex)
+                        val targetUrl = account.customUrl.ifBlank { PreferencesManager.GAME_URL }
+                        view?.loadUrl(targetUrl)
+                    }
+                }, delayMs)
             }
 
             // QUY CHUẨN 4: Tự cứu khi tiến trình WebView bị thu hồi RAM
