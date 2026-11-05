@@ -83,6 +83,14 @@ class GameTabManager(
     private var periodicWatchdogJob: Job? = null
     private var garbageCollectionJob: Job? = null
 
+    companion object {
+        // Tên profile WebView được lưu trên đĩa, nên nó quyết định cookie/session của từng tab.
+        // Bản cũ đặt tên "Isolated_Cluster_1_Tab_N" cho mọi người dùng chưa từng đổi Cụm
+        // (và cả 3 Cụm đều trỏ về cùng một URL, nên "Cụm 1" là mặc định thực tế).
+        // Giữ nguyên tiền tố đó để bản nâng cấp không đăng xuất toàn bộ người dùng hiện tại.
+        private const val PROFILE_PREFIX = "Isolated_Cluster_1_Tab_"
+    }
+
     init {
         // Pre-create WebViews with strict Isolated Profiles, but DO NOT load URLs yet (Idle)
         mainHandler.post {
@@ -91,14 +99,6 @@ class GameTabManager(
             }
         }
         startBackgroundLoops()
-    }
-
-    private fun getClusterId(): String {
-        return when (prefs.getCluster()) {
-            "Cụm 2" -> "2"
-            "Cụm 3" -> "3"
-            else -> "1"
-        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -110,16 +110,15 @@ class GameTabManager(
 
         // =========================================================================
         // QUY CHUẨN 1: QUY TẮC SỐNG CÒN KHI KHỞI TẠO WEBVIEW
-        // Dòng lệnh ĐẦU TIÊN ngay sau val webView = KeepAliveWebView(context) BẮT BUỘC phải là:
-        // WebViewCompat.setProfile(webView, "Isolated_Cluster_${clusterId}_Tab_${tabIndex}")
+        // Dòng lệnh ĐẦU TIÊN ngay sau val webView = KeepAliveWebView(context) BẮT BUỘC phải là
+        // WebViewCompat.setProfile(...) — xem hằng PROFILE_PREFIX bên dưới.
         // Tuyệt đối KHÔNG được gọi webView.settings, CookieManager, hay bất kỳ hàm nào
         // của webView trước dòng này để tránh bị khóa vào Default Profile!
         // =========================================================================
         val webView = KeepAliveWebView(context)
-        val clusterId = getClusterId()
         if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             try {
-                WebViewCompat.setProfile(webView, "Isolated_Cluster_${clusterId}_Tab_${tabIndex}")
+                WebViewCompat.setProfile(webView, "$PROFILE_PREFIX$tabIndex")
             } catch (_: Exception) {}
         }
 
@@ -210,7 +209,7 @@ class GameTabManager(
                     mainHandler.postDelayed({
                         if (isTabActive[tabIndex] && _isSystemRunning.value) {
                             val account = prefs.getAccount(tabIndex)
-                            val targetUrl = account.customUrl.ifBlank { prefs.getClusterUrl(prefs.getCluster()) }
+                            val targetUrl = account.customUrl.ifBlank { PreferencesManager.GAME_URL }
                             view?.loadUrl(targetUrl)
                         }
                     }, 2500)
@@ -247,8 +246,7 @@ class GameTabManager(
     fun loginAll() {
         _isSystemRunning.value = true
         KeepAliveService.start(context)
-        val cluster = prefs.getCluster()
-        val defaultUrl = prefs.getClusterUrl(cluster)
+        val defaultUrl = PreferencesManager.GAME_URL
 
         startLoginStepLoop()
         coroutineScope.launch(Dispatchers.Main) {
@@ -293,8 +291,7 @@ class GameTabManager(
         if (loginQueueJob?.isActive != true) {
             startLoginStepLoop()
         }
-        val cluster = prefs.getCluster()
-        val defaultUrl = prefs.getClusterUrl(cluster)
+        val defaultUrl = PreferencesManager.GAME_URL
         val account = prefs.getAccount(tabIndex)
         val targetUrl = account.customUrl.ifBlank { defaultUrl }
 
@@ -324,8 +321,7 @@ class GameTabManager(
     // QUY CHUẨN 4: Tự mở lại Tab và đăng nhập lại khi bị văng
     fun reopenAndReloginTab(tabIndex: Int) {
         if (!_isSystemRunning.value || !isTabActive[tabIndex]) return
-        val cluster = prefs.getCluster()
-        val defaultUrl = prefs.getClusterUrl(cluster)
+        val defaultUrl = PreferencesManager.GAME_URL
         val account = prefs.getAccount(tabIndex)
         val targetUrl = account.customUrl.ifBlank { defaultUrl }
 
@@ -516,23 +512,6 @@ class GameTabManager(
             val script = GameScriptInjector.buildFpsLimiterScript(fps)
             for (i in 0..3) {
                 webViews[i]?.evaluateJavascript(script, null)
-            }
-        }
-    }
-
-    // Đổi Cụm
-    fun switchCluster(newCluster: String) {
-        prefs.setCluster(newCluster)
-        if (_isSystemRunning.value) {
-            // Re-create WebViews with new profile
-            mainHandler.post {
-                for (i in 0..3) {
-                    try {
-                        webViews[i]?.destroy()
-                    } catch (_: Exception) {}
-                    webViews[i] = null
-                }
-                loginAll()
             }
         }
     }

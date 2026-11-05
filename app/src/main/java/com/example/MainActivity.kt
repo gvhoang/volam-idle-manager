@@ -28,13 +28,11 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.unit.dp
-import com.example.model.ViewLayoutMode
 import com.example.ui.MainViewModel
 import com.example.ui.components.AccountDialog
 import com.example.ui.components.GameWebViewContainer
 import com.example.ui.components.HeaderBar
 import com.example.ui.components.OledBlackScreen
-import com.example.ui.components.ProxyDialog
 import com.example.ui.components.SidebarView
 import com.example.ui.theme.MyApplicationTheme
 
@@ -91,7 +89,6 @@ fun MainScreen(
     val configuration = LocalConfiguration.current
     val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
 
-    val vpnActive by viewModel.vpnActive.collectAsState()
     val isMasterAutoRunning by viewModel.isMasterAutoRunning.collectAsState()
     val characterStatsList by viewModel.characterStatsList.collectAsState()
     val selectedTabIndex by viewModel.selectedTabIndex.collectAsState()
@@ -100,9 +97,7 @@ fun MainScreen(
     val isSleepMode by viewModel.isSleepMode.collectAsState()
     val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
     val layoutMode by viewModel.layoutMode.collectAsState()
-    val cluster by viewModel.cluster.collectAsState()
     val editingAccount by viewModel.editingAccount.collectAsState()
-    val isProxyDialogVisible by viewModel.isProxyDialogVisible.collectAsState()
     val isBlackScreenSynced by viewModel.isBlackScreenSynced.collectAsState()
 
     // Handle brightness adjustments when Sleep Mode toggles
@@ -111,11 +106,10 @@ fun MainScreen(
     }
 
     // Back button handling
-    BackHandler(enabled = isSleepMode || editingAccount != null || isProxyDialogVisible || (isPortrait && isSidebarVisible)) {
+    BackHandler(enabled = isSleepMode || editingAccount != null || (isPortrait && isSidebarVisible)) {
         when {
             isSleepMode -> viewModel.setSleepMode(false)
             editingAccount != null -> viewModel.dismissAccountDialog()
-            isProxyDialogVisible -> viewModel.closeProxyDialog()
             isPortrait && isSidebarVisible -> viewModel.toggleSidebar()
         }
     }
@@ -135,8 +129,6 @@ fun MainScreen(
                 HeaderBar(
                     isSidebarVisible = isSidebarVisible,
                     onToggleSidebar = { viewModel.toggleSidebar() },
-                    currentCluster = cluster,
-                    onChangeCluster = { viewModel.changeCluster(it) },
                     networkData = networkData,
                     onResetNetworkStats = { viewModel.resetNetworkCounters() },
                     fps = fps,
@@ -176,15 +168,12 @@ fun MainScreen(
 
                             // Bảng điều khiển (Sidebar) hiển thị đè lên bên trái với bề rộng 320dp
                             SidebarView(
-                                isVpnActive = vpnActive,
                                 isMasterAutoRunning = isMasterAutoRunning,
                                 characterStatsList = characterStatsList,
                                 selectedTabIndex = selectedTabIndex,
                                 onSelectTab = { viewModel.selectTab(it) },
                                 onLoginAll = { viewModel.onMasterLoginAllClicked() },
                                 onStopAll = { viewModel.onMasterStopAllClicked() },
-                                onLaunchProtonVpn = { viewModel.vpnManager.launchProtonVpn() },
-                                onOpenProxyConfig = { viewModel.openProxyDialog() },
                                 onEditAccount = { viewModel.startEditingAccount(it) },
                                 onSyncAutoMode = { viewModel.syncAutoMode(it) },
                                 onToggleSidebar = { viewModel.toggleSidebar() },
@@ -207,15 +196,12 @@ fun MainScreen(
                     ) {
                         if (isSidebarVisible) {
                             SidebarView(
-                                isVpnActive = vpnActive,
                                 isMasterAutoRunning = isMasterAutoRunning,
                                 characterStatsList = characterStatsList,
                                 selectedTabIndex = selectedTabIndex,
                                 onSelectTab = { viewModel.selectTab(it) },
                                 onLoginAll = { viewModel.onMasterLoginAllClicked() },
                                 onStopAll = { viewModel.onMasterStopAllClicked() },
-                                onLaunchProtonVpn = { viewModel.vpnManager.launchProtonVpn() },
-                                onOpenProxyConfig = { viewModel.openProxyDialog() },
                                 onEditAccount = { viewModel.startEditingAccount(it) },
                                 onSyncAutoMode = { viewModel.syncAutoMode(it) },
                                 onToggleSidebar = { viewModel.toggleSidebar() },
@@ -253,25 +239,6 @@ fun MainScreen(
                     accountConfig = account,
                     onSave = { updated -> viewModel.saveEditingAccount(updated) },
                     onDismiss = { viewModel.dismissAccountDialog() }
-                )
-            }
-
-            // Proxy & VPN Config Dialog
-            if (isProxyDialogVisible) {
-                ProxyDialog(
-                    prefs = viewModel.prefs,
-                    onSaveProxy = { host, port, autoProxy, autoProton ->
-                        viewModel.prefs.setProxyConfig(host, port)
-                        viewModel.prefs.setAutoProxyEnabled(autoProxy)
-                        viewModel.prefs.setAutoProtonVpn(autoProton)
-                        if (autoProxy) {
-                            viewModel.vpnManager.applyInternalProxy(host, port)
-                        } else {
-                            viewModel.vpnManager.clearProxy()
-                        }
-                        viewModel.closeProxyDialog()
-                    },
-                    onDismiss = { viewModel.closeProxyDialog() }
                 )
             }
         }

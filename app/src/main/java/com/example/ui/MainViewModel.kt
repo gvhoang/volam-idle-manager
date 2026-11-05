@@ -10,7 +10,6 @@ import com.example.model.CharacterStats
 import com.example.model.NetworkDataInfo
 import com.example.model.ViewLayoutMode
 import com.example.network.TrafficMonitor
-import com.example.network.VpnManager
 import com.example.webview.GameTabManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -22,12 +21,8 @@ import kotlinx.coroutines.launch
 class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     val prefs = PreferencesManager(application)
-    val vpnManager = VpnManager(application)
     val trafficMonitor = TrafficMonitor(application)
     val tabManager = GameTabManager(application, prefs, viewModelScope)
-
-    private val _vpnActive = MutableStateFlow(vpnManager.checkVpnActive())
-    val vpnActive: StateFlow<Boolean> = _vpnActive.asStateFlow()
 
     private val _networkData = MutableStateFlow(NetworkDataInfo())
     val networkData: StateFlow<NetworkDataInfo> = _networkData.asStateFlow()
@@ -47,14 +42,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _layoutMode = MutableStateFlow(ViewLayoutMode.FOUR_COLUMNS)
     val layoutMode: StateFlow<ViewLayoutMode> = _layoutMode.asStateFlow()
 
-    private val _cluster = MutableStateFlow(prefs.getCluster())
-    val cluster: StateFlow<String> = _cluster.asStateFlow()
-
     private val _editingAccount = MutableStateFlow<AccountConfig?>(null)
     val editingAccount: StateFlow<AccountConfig?> = _editingAccount.asStateFlow()
-
-    private val _isProxyDialogVisible = MutableStateFlow(false)
-    val isProxyDialogVisible: StateFlow<Boolean> = _isProxyDialogVisible.asStateFlow()
 
     private val _isBlackScreenSynced = MutableStateFlow(false)
     val isBlackScreenSynced: StateFlow<Boolean> = _isBlackScreenSynced.asStateFlow()
@@ -64,18 +53,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val characterStatsList: StateFlow<List<CharacterStats>> = tabManager.characterStatsList
 
     init {
-        // Module 1: VPN check and setup on startup
-        checkAndHandleVpnStartup()
-
-        // Register VPN callback
-        vpnManager.registerVpnCallback { active ->
-            _vpnActive.value = active
-            if (active && prefs.isAutoProtonVpn() && !isSystemRunning.value) {
-                // When VPN becomes active and auto-start was pending, trigger login all
-                tabManager.loginAll()
-            }
-        }
-
         // Module 5: Traffic stats loop every 2 seconds
         viewModelScope.launch(Dispatchers.Default) {
             while (true) {
@@ -84,24 +61,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 val sampled = trafficMonitor.sample(rxOffset, txOffset)
                 _networkData.value = sampled
                 delay(2000)
-            }
-        }
-    }
-
-    // MODULE 1: Auto-check and activate VPN or Proxy on startup
-    fun checkAndHandleVpnStartup() {
-        val active = vpnManager.checkVpnActive()
-        _vpnActive.value = active
-
-        if (!active) {
-            if (prefs.isAutoProxyEnabled()) {
-                vpnManager.applyInternalProxy(
-                    host = prefs.getProxyHost(),
-                    port = prefs.getProxyPort()
-                )
-            }
-            if (prefs.isAutoProtonVpn()) {
-                vpnManager.launchProtonVpn()
             }
         }
     }
@@ -145,11 +104,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun changeCluster(newCluster: String) {
-        _cluster.value = newCluster
-        tabManager.switchCluster(newCluster)
-    }
-
     // MODULE 7: Sync auto mode (Nhiệm Vụ, Phó Bản, Luyện Công)
     fun syncAutoMode(mode: String) {
         tabManager.syncAutoMode(mode)
@@ -182,16 +136,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _editingAccount.value = null
     }
 
-    fun openProxyDialog() {
-        _isProxyDialogVisible.value = true
-    }
-
-    fun closeProxyDialog() {
-        _isProxyDialogVisible.value = false
-    }
-
     override fun onCleared() {
-        vpnManager.unregisterVpnCallback()
         tabManager.cleanup()
         super.onCleared()
     }
