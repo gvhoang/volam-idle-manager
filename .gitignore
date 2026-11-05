@@ -1,0 +1,29 @@
+# Built artifacts — never commit
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Gradle / build output
+.gradle/
+.kotlin/
+build/
+/captures
+.externalNativeBuild
+.cxx
+
+# Local config and signing material — never commit
+local.properties
+.env
+debug.keystore
+*.jks
+*.keystore
+
+# IDE
+*.iml
+.idea/
+.DS_Store
+
+# AI Studio preview artifacts (not part of the Android build)
+.aistudio/
+public/

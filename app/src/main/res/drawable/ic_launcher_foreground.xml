@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Golden Shield Badge -->
+    <path
+        android:pathData="M54,26 L74,34 C74,56 65,71 54,78 C43,71 34,56 34,34 Z"
+        android:strokeWidth="1.5"
+        android:strokeColor="#FFE082">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="34"
+                android:startY="26"
+                android:endX="74"
+                android:endY="78"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#D4AF37" />
+                <item android:offset="0.5" android:color="#F7D070" />
+                <item android:offset="1.0" android:color="#AA7C11" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Inner Shield Inset -->
+    <path
+        android:pathData="M54,30 L70,36.5 C70,54 62,66 54,72 C46,66 38,54 38,36.5 Z"
+        android:fillColor="#101827"
+        android:strokeWidth="1"
+        android:strokeColor="#FFE082" />
+    <!-- Vertical Sword Blade -->
+    <path
+        android:pathData="M52.5,23 L55.5,23 L54.8,58 L53.2,58 Z"
+        android:fillColor="#E0F2FE" />
+    <path
+        android:pathData="M54,20 L56.5,25 L51.5,25 Z"
+        android:fillColor="#FFFFFF" />
+    <!-- Sword Guard -->
+    <path
+        android:pathData="M46,58 C49,60 59,60 62,58 L63,60.5 C59,62.5 49,62.5 45,60.5 Z"
+        android:fillColor="#F59E0B" />
+    <!-- Sword Hilt & Pommel -->
+    <path
+        android:pathData="M52.5,61 L55.5,61 L55.5,69 L52.5,69 Z"
+        android:fillColor="#B45309" />
+    <path
+        android:pathData="M54,72 A2.5,2.5 0 1,0 54,67 A2.5,2.5 0 1,0 54,72"
+        android:fillColor="#F59E0B" />
+    <!-- 4 Manager Indicators (Representing 4 accounts/tabs) -->
+    <path
+        android:pathData="M45,44 A2.2,2.2 0 1,0 45,39.6 A2.2,2.2 0 1,0 45,44"
+        android:fillColor="#10B981" />
+    <path
+        android:pathData="M63,44 A2.2,2.2 0 1,0 63,39.6 A2.2,2.2 0 1,0 63,44"
+        android:fillColor="#10B981" />
+    <path
+        android:pathData="M46,53 A2.2,2.2 0 1,0 46,48.6 A2.2,2.2 0 1,0 46,53"
+        android:fillColor="#10B981" />
+    <path
+        android:pathData="M62,53 A2.2,2.2 0 1,0 62,48.6 A2.2,2.2 0 1,0 62,53"
+        android:fillColor="#10B981" />
+</vector>

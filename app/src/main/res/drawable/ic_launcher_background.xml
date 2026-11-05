@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <path
+        android:pathData="M0,0h108v108h-108z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:startX="0"
+                android:startY="0"
+                android:endX="108"
+                android:endY="108"
+                android:type="linear">
+                <item android:offset="0.0" android:color="#0D131F" />
+                <item android:offset="0.5" android:color="#141E30" />
+                <item android:offset="1.0" android:color="#1B2A4A" />
+            </gradient>
+        </aapt:attr>
+    </path>
+    <!-- Subtle circular aura -->
+    <path
+        android:pathData="M54,20 A34,34 0 1,0 54,88 A34,34 0 1,0 54,20"
+        android:strokeWidth="1.5"
+        android:strokeColor="#254B8C"
+        android:fillColor="#00000000" />
+    <path
+        android:pathData="M54,27 A27,27 0 1,0 54,81 A27,27 0 1,0 54,27"
+        android:strokeWidth="1"
+        android:strokeColor="#3A6BB8"
+        android:fillColor="#00000000" />
+</vector>

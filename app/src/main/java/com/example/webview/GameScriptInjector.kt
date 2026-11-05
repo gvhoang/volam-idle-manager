@@ -1,0 +1,1503 @@
+package com.example.webview
+
+import org.json.JSONObject
+
+object GameScriptInjector {
+
+    fun quote(str: String): String {
+        return "\"" + str
+            .replace("\\", "\\\\")
+            .replace("\"", "\\\"")
+            .replace("\n", "\\n")
+            .replace("\r", "\\r")
+            .replace("\t", "\\t")
+            .replace("\b", "\\b") + "\""
+    }
+
+    fun buildClearStorageScript(): String {
+        return """
+        try {
+            localStorage.clear();
+            sessionStorage.clear();
+        } catch(e) {}
+        """.trimIndent()
+    }
+
+    fun buildAdjustViewportScript(): String {
+        return """
+        try {
+            if (!document.getElementById('__vl_mobile_opt_style') && document.head) {
+                const st = document.createElement('style');
+                st.id = '__vl_mobile_opt_style';
+                st.textContent = `
+                    * {
+                        backdrop-filter: none !important;
+                        -webkit-backdrop-filter: none !important;
+                    }
+                    input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]) {
+                        min-width: 44px !important;
+                    }
+                    @media (max-width: 280px) {
+                        input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]) {
+                            min-width: 36px !important;
+                            width: 100% !important;
+                        }
+                    }
+                `;
+                document.head.appendChild(st);
+            }
+            window.dispatchEvent(new Event('resize'));
+            if (document.body) {
+                document.body.style.width = '100%';
+                document.body.style.height = '100%';
+            }
+        } catch(e) {}
+        """.trimIndent()
+    }
+
+    // Auto-Login Tuần Tự (Chuẩn Giao Diện Phiên Bản 1031: Ấn "Bắt Đầu Trò Chơi" -> Khung "Đăng Nhập" -> Điền "Tài khoản:" & "Mật mã:" -> Tích "Nhớ tài khoản" -> Ấn "Xác Định")
+    // Tối ưu đặc biệt cho cả chế độ 4 Cột Dọc (màn hình hẹp ~90dp/cột trên điện thoại dọc) lẫn Lưới 2x2 và Màn ngang.
+    fun buildAutoLoginStepScript(
+        tabIndex: Int,
+        username: String,
+        password: String
+    ): String {
+        val safeUserJson = quote(username)
+        val safePassJson = quote(password)
+
+        return """
+        (function(username, password) {
+            try {
+                const tabIdx = $tabIndex;
+
+                // Bơm CSS chống bóp nghẹt ô <input> khi ở chế độ 4 tab dọc trên màn hình dọc điện thoại (~90px/cột)
+                // và tắt backdrop-filter blur giúp 4 WebView chạy mượt nhẹ trên GPU điện thoại
+                try {
+                    if (!document.getElementById('__vl_mobile_opt_style') && document.head) {
+                        const st = document.createElement('style');
+                        st.id = '__vl_mobile_opt_style';
+                        st.textContent = `
+                            * {
+                                backdrop-filter: none !important;
+                                -webkit-backdrop-filter: none !important;
+                            }
+                            input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]) {
+                                min-width: 44px !important;
+                            }
+                            @media (max-width: 280px) {
+                                input:not([type="checkbox"]):not([type="radio"]):not([type="button"]):not([type="submit"]) {
+                                    min-width: 36px !important;
+                                    width: 100% !important;
+                                }
+                            }
+                        `;
+                        document.head.appendChild(st);
+                    }
+                } catch(e) {}
+
+                function norm(str) {
+                    return (str || '').toString().toLowerCase().normalize('NFC').replace(/\s+/g, ' ').trim();
+                }
+
+                function noAccent(str) {
+                    return norm(str)
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .replace(/đ/g, 'd');
+                }
+
+                // Kiểm tra phần tử có đang hiển thị hay không.
+                // Lưu ý quan trọng:
+                // 1. Tuyệt đối KHÔNG dùng regex /\bhidden\b/ trên className vì sẽ khớp nhầm với "overflow-hidden".
+                // 2. Ở chế độ 4 tab dọc trên điện thoại dọc, bề ngang mỗi cột rất hẹp (~90dp), khiến thẻ <input>
+                //    nằm cạnh nhãn "Tài khoản:" / "Mật mã:" trong dòng flex có thể bị ép rect.width về 0..2px.
+                //    Do đó với INPUT / BUTTON / SELECT / TEXTAREA, chỉ cần phần tử và tổ tiên không bị display:none /
+                //    visibility:hidden / opacity:0 và có offsetParent hoặc chiều cao > 0 là coi như đang hiển thị!
+                function isVisible(el) {
+                    if (!el || !el.isConnected) return false;
+                    if ((el.type || '').toLowerCase() === 'hidden') return false;
+                    let cur = el;
+                    while (cur && cur !== document.body && cur !== document.documentElement) {
+                        if (cur.hidden === true) return false;
+                        try {
+                            const style = window.getComputedStyle(cur);
+                            if (style && (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || parseFloat(style.opacity) === 0)) {
+                                return false;
+                            }
+                        } catch(e) {}
+                        cur = cur.parentElement;
+                    }
+                    const tag = (el.tagName || '').toUpperCase();
+                    const isFormOrBtn = (tag === 'INPUT' || tag === 'BUTTON' || tag === 'SELECT' || tag === 'TEXTAREA' || el.getAttribute('role') === 'button');
+                    try {
+                        const rect = el.getBoundingClientRect();
+                        if (isFormOrBtn) {
+                            if (rect.height > 0 || rect.width > 0 || el.offsetParent !== null) return true;
+                            if (el.parentElement) {
+                                const pRect = el.parentElement.getBoundingClientRect();
+                                return pRect.height > 0 || pRect.width > 0;
+                            }
+                        }
+                        return rect.width > 1 && rect.height > 1;
+                    } catch(e) {
+                        return el.offsetParent !== null;
+                    }
+                }
+
+                // Click chuẩn xác 1 lần duy nhất trên phần tử nút bấm (tránh double-click làm đóng lại bảng vừa mở)
+                function realClick(el) {
+                    if (!el) return;
+                    const target = el.closest('button, [role="button"], a, input[type="button"], input[type="submit"]') || el;
+                    try {
+                        target.disabled = false;
+                        target.removeAttribute('disabled');
+                        if (target.classList) target.classList.remove('disabled');
+                    } catch(e) {}
+                    try {
+                        const rect = target.getBoundingClientRect();
+                        const cx = rect.left + Math.max(2, rect.width / 2);
+                        const cy = rect.top + Math.max(2, rect.height / 2);
+                        ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(type => {
+                            try {
+                                target.dispatchEvent(new MouseEvent(type, {
+                                    view: window, bubbles: true, cancelable: true, clientX: cx, clientY: cy, buttons: 1
+                                }));
+                            } catch(e) {}
+                        });
+                    } catch(e) {}
+                    if (typeof target.click === 'function') {
+                        try { target.click(); } catch(e) {}
+                    } else {
+                        try {
+                            target.dispatchEvent(new MouseEvent('click', {
+                                view: window, bubbles: true, cancelable: true
+                            }));
+                        } catch(e) {}
+                    }
+                }
+
+                // Hàm Điền Chữ "Ép Cứng" Chuẩn React 18 / Vue 3 / Native DOM
+                // Kèm cơ chế khóa bàn phím ảo (inputmode="none") tạm thời để khi điền 4 tab trên điện thoại
+                // không làm bật bàn phím ảo của Android gây giật khung hình hoặc mất focus.
+                function forceFillReactInput(inputEl, textValue) {
+                    if (!inputEl || textValue === undefined || textValue === null) return;
+                    const strVal = String(textValue);
+                    const prevInputMode = inputEl.getAttribute('inputmode');
+                    try {
+                        inputEl.setAttribute('inputmode', 'none');
+                    } catch(e) {}
+
+                    try { inputEl.focus({ preventScroll: true }); } catch(e) {
+                        try { inputEl.focus(); } catch(e2) {}
+                    }
+
+                    if (inputEl._valueTracker) {
+                        try { inputEl._valueTracker.setValue(''); } catch(e) {}
+                    }
+
+                    let nativeSetter = null;
+                    try {
+                        nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set;
+                        if (!nativeSetter) {
+                            nativeSetter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(inputEl), 'value')?.set;
+                        }
+                    } catch(e) {}
+
+                    if (nativeSetter) {
+                        try { nativeSetter.call(inputEl, strVal); } catch(e) { inputEl.value = strVal; }
+                    } else {
+                        inputEl.value = strVal;
+                    }
+
+                    try { inputEl.dispatchEvent(new Event('focus', { bubbles: true })); } catch(e) {}
+                    try { inputEl.dispatchEvent(new Event('keydown', { bubbles: true })); } catch(e) {}
+                    try {
+                        if (typeof InputEvent === 'function') {
+                            inputEl.dispatchEvent(new InputEvent('input', { bubbles: true, cancelable: true, data: strVal, inputType: 'insertText' }));
+                        } else {
+                            inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+                        }
+                    } catch(e) {
+                        try { inputEl.dispatchEvent(new Event('input', { bubbles: true })); } catch(e2) {}
+                    }
+                    try { inputEl.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+                    try { inputEl.dispatchEvent(new Event('keyup', { bubbles: true })); } catch(e) {}
+                    try { inputEl.dispatchEvent(new Event('blur', { bubbles: true })); } catch(e) {}
+
+                    setTimeout(function() {
+                        try {
+                            if (prevInputMode === null) inputEl.removeAttribute('inputmode');
+                            else inputEl.setAttribute('inputmode', prevInputMode);
+                        } catch(e) {}
+                    }, 600);
+                }
+
+                // Lấy thông tin nhãn/placeholder gắn trực tiếp với từng ô <input>
+                // Dùng textContent thay vì chỉ innerText để không bị ngắt dòng làm sai từ khi cột hẹp 90px,
+                // và chỉ lấy text của parent khi parent bọc riêng đúng 1 ô <input> (tránh lẫn "Máy chủ: Võ Lâm Idle")
+                function getOwnInputMeta(inp) {
+                    const parts = [
+                        inp.placeholder || '',
+                        inp.name || '',
+                        inp.id || '',
+                        inp.getAttribute('aria-label') || '',
+                        inp.getAttribute('autocomplete') || '',
+                        inp.title || ''
+                    ];
+                    if (inp.labels && inp.labels.length > 0) {
+                        for (const lb of Array.from(inp.labels)) {
+                            parts.push(lb.textContent || lb.innerText || '');
+                        }
+                    }
+                    const closestLabel = inp.closest('label');
+                    if (closestLabel) {
+                        parts.push(closestLabel.textContent || closestLabel.innerText || '');
+                    }
+                    const prev = inp.previousElementSibling;
+                    if (prev) {
+                        const prevTxt = (prev.textContent || prev.innerText || '').replace(/\s+/g, ' ').trim();
+                        if (prevTxt.length <= 50) parts.push(prevTxt);
+                    }
+                    const parent = inp.parentElement;
+                    if (parent) {
+                        const inputsInParent = parent.querySelectorAll('input').length;
+                        if (inputsInParent === 1) {
+                            const pTxt = (parent.textContent || parent.innerText || '').replace(/\s+/g, ' ').trim();
+                            if (pTxt.length <= 70) {
+                                parts.push(pTxt);
+                            }
+                        }
+                    }
+                    return noAccent(parts.join(' '));
+                }
+
+                // Loại trừ dòng "Máy chủ: Võ Lâm Idle" nếu nó là thẻ <input>
+                function isServerField(inp) {
+                    if ((inp.type || '').toLowerCase() === 'password') return false;
+                    if (inp.readOnly || inp.disabled) return true;
+                    const valNA = noAccent(inp.value || '');
+                    if (valNA.includes('vo lam idle')) return true;
+                    const meta = getOwnInputMeta(inp);
+                    if (meta.includes('tai khoan') || meta.includes('mat ma') || meta.includes('mat khau') || meta.includes('username') || meta.includes('password')) {
+                        return false;
+                    }
+                    return meta.includes('may chu') || meta.includes('server');
+                }
+
+                function isConfirmField(inp) {
+                    const meta = getOwnInputMeta(inp);
+                    return meta.includes('xac nhan') || meta.includes('nhap lai') || meta.includes('confirm') || meta.includes('retype');
+                }
+
+                function isPasswordField(inp) {
+                    if (isServerField(inp)) return false;
+                    if ((inp.type || '').toLowerCase() === 'password') return true;
+                    const meta = getOwnInputMeta(inp);
+                    return meta.includes('mat ma') || meta.includes('mat khau') || meta.includes('password') || meta.includes('pass');
+                }
+
+                function isUsernameField(inp) {
+                    if (isServerField(inp) || isPasswordField(inp) || isConfirmField(inp)) return false;
+                    const meta = getOwnInputMeta(inp);
+                    return meta.includes('tai khoan') || meta.includes('ten dang nhap') || meta.includes('ten nhan vat') ||
+                           meta.includes('username') || meta.includes('account') || meta.includes('user');
+                }
+
+                const allClickables = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a, div, span, p, label'));
+
+                function getVisibleEditableInputs() {
+                    return Array.from(document.querySelectorAll('input')).filter(inp => {
+                        const t = (inp.type || 'text').toLowerCase();
+                        if (['hidden', 'checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'file', 'range', 'color'].includes(t)) {
+                            return false;
+                        }
+                        if (!isVisible(inp)) return false;
+                        if (isServerField(inp)) return false;
+                        return true;
+                    });
+                }
+
+                // Tìm nút bấm theo danh sách từ khóa chuẩn hóa:
+                // Kiểm tra khớp chuỗi (textContent / innerText) TRƯỚC khi gọi isVisible(el)
+                // để giảm 99% số lệnh getComputedStyle/getBoundingClientRect giúp điện thoại chạy cực mượt!
+                function findBestButtonByText(matcherFn) {
+                    let bestEl = null;
+                    let bestScore = -999;
+
+                    for (const el of allClickables) {
+                        const rawContent = (el.textContent || el.value || '').replace(/\s+/g, ' ').trim();
+                        if (!rawContent || rawContent.length > 45) continue;
+                        const contentNA = noAccent(rawContent);
+
+                        let matchScore = matcherFn(contentNA, rawContent, el);
+                        if (matchScore <= 0) {
+                            const rawInner = (el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
+                            if (rawInner && rawInner.length <= 45 && rawInner !== rawContent) {
+                                matchScore = matcherFn(noAccent(rawInner), rawInner, el);
+                            }
+                        }
+                        if (matchScore <= 0) continue;
+
+                        if (!isVisible(el)) continue;
+
+                        let score = matchScore;
+                        const tag = (el.tagName || '').toUpperCase();
+                        if (tag === 'BUTTON' || tag === 'INPUT') score += 60;
+                        else if (el.getAttribute('role') === 'button' || tag === 'A') score += 45;
+                        else if (el.closest('button, [role="button"], a')) score += 35;
+
+                        if (el.children && el.children.length === 0) score += 20;
+                        else if (el.children && el.children.length <= 4) score += 10;
+
+                        if (score > bestScore) {
+                            bestScore = score;
+                            bestEl = el;
+                        }
+                    }
+                    return bestEl;
+                }
+
+                // Tìm nút Submit trong khung Đăng Nhập:
+                // Trong phiên bản 1031, nút xác nhận đăng nhập có chữ "Xác Định" (nằm bên trái nút "Hủy", phía dưới ô "Mật mã:")
+                function findLoginSubmitButton(referenceInput) {
+                    const refRect = referenceInput ? referenceInput.getBoundingClientRect() : null;
+                    return findBestButtonByText(function(txtNA, rawTxt, el) {
+                        if (txtNA === 'huy' || txtNA.includes('dang ky') || txtNA.includes('quen mat') ||
+                            txtNA.includes('hien mat') || txtNA.includes('nho tai khoan') ||
+                            txtNA.includes('tao nhan vat') || txtNA.includes('chua co tai khoan') ||
+                            txtNA.includes('bat dau tro choi')) {
+                            return -1;
+                        }
+
+                        let base = 0;
+                        if (txtNA === 'xac dinh') base = 200;
+                        else if (txtNA === 'xac nhan' || txtNA === 'dang nhap' || txtNA === 'login') base = 120;
+                        else if (txtNA.startsWith('xac dinh') || txtNA.startsWith('dang nhap')) base = 90;
+                        else return -1;
+
+                        if (referenceInput && refRect && refRect.height > 0) {
+                            try {
+                                const btnRect = el.getBoundingClientRect();
+                                if (btnRect.height > 0 && btnRect.top >= refRect.top - 20) {
+                                    base += 80;
+                                }
+                            } catch(e) {}
+                        }
+                        return base;
+                    });
+                }
+
+                // Hàm thực hiện điền Tài khoản + Mật mã + tích Nhớ tài khoản + ấn "Xác Định" khi khung Đăng Nhập đã mở
+                function tryFillAndSubmitLoginModal() {
+                    const editableInputs = getVisibleEditableInputs();
+                    if (editableInputs.length === 0) return null;
+
+                    let passInput = null;
+                    let userInput = null;
+
+                    for (const inp of editableInputs) {
+                        if ((inp.type || '').toLowerCase() === 'password' && !isConfirmField(inp)) {
+                            passInput = inp;
+                            break;
+                        }
+                    }
+                    if (!passInput) {
+                        for (const inp of editableInputs) {
+                            if (isPasswordField(inp) && !isConfirmField(inp)) {
+                                passInput = inp;
+                                break;
+                            }
+                        }
+                    }
+                    // Fallback chuẩn cho bảng Đăng Nhập 2 ô (Ô 1: Tài khoản, Ô 2: Mật mã) trên màn hình dọc 4 cột hẹp
+                    if (!passInput && editableInputs.length === 2 && !isConfirmField(editableInputs[1])) {
+                        userInput = editableInputs[0];
+                        passInput = editableInputs[1];
+                    }
+
+                    if (!passInput) return null;
+
+                    if (!username || !password) {
+                        if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                            window.AndroidBridge.onGameLog(tabIdx, "Chờ nhập TK & MK ở nút 🔑 TK");
+                        }
+                        return "NO_CREDENTIALS";
+                    }
+
+                    // Tìm ô "Tài khoản:" nếu chưa gán từ fallback
+                    if (!userInput) {
+                        for (const inp of editableInputs) {
+                            if (inp === passInput) continue;
+                            if (isUsernameField(inp)) {
+                                userInput = inp;
+                                break;
+                            }
+                        }
+                    }
+                    if (!userInput) {
+                        const passIdx = editableInputs.indexOf(passInput);
+                        if (passIdx > 0) {
+                            for (let i = passIdx - 1; i >= 0; i--) {
+                                const candidate = editableInputs[i];
+                                if (!isConfirmField(candidate) && !isPasswordField(candidate)) {
+                                    userInput = candidate;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+                    if (!userInput) {
+                        for (const inp of editableInputs) {
+                            if (inp !== passInput && !isConfirmField(inp)) {
+                                userInput = inp;
+                                break;
+                            }
+                        }
+                    }
+
+                    const nowMs = Date.now();
+                    const timeSinceLastSubmit = nowMs - (window.__lastLoginSubmitTime || 0);
+                    const valuesAlreadyMatch = (!userInput || userInput.value === username) && (passInput.value === password);
+
+                    if (valuesAlreadyMatch && timeSinceLastSubmit < 950) {
+                        return "WAITING_LOGIN_RESPONSE";
+                    }
+
+                    // 1. Điền Tài khoản và Mật mã ngay lập tức
+                    if (userInput) {
+                        forceFillReactInput(userInput, username);
+                    }
+                    forceFillReactInput(passInput, password);
+
+                    // 2. Tích "Nhớ tài khoản", TUYỆT ĐỐI KHÔNG tích "Hiện mật mã"
+                    const visibleCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter(isVisible);
+                    for (const cb of visibleCheckboxes) {
+                        const lb = cb.closest('label');
+                        const nextEl = cb.nextElementSibling;
+                        const parentEl = cb.parentElement;
+                        const singleCbInParent = parentEl && parentEl.querySelectorAll('input[type="checkbox"]').length === 1;
+                        const cbText = noAccent(
+                            (lb ? (lb.textContent || lb.innerText || '') : '') + ' ' +
+                            (nextEl ? (nextEl.textContent || nextEl.innerText || '') : '') + ' ' +
+                            (singleCbInParent ? (parentEl.textContent || parentEl.innerText || '') : '')
+                        );
+
+                        if (cbText.includes('hien mat') || cbText.includes('hien thi mat') || cbText.includes('show pass')) {
+                            if (cb.checked) {
+                                try { cb.click(); } catch(e) {}
+                            }
+                            continue;
+                        }
+
+                        if (cbText.includes('nho tai khoan') || cbText.includes('ghi nho') || cbText.includes('remember')) {
+                            if (!cb.checked) {
+                                try { cb.click(); } catch(e) {}
+                                if (!cb.checked) {
+                                    cb.checked = true;
+                                    try { cb.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+                                }
+                            }
+                        }
+                    }
+
+                    // 3. Sau 65ms (và nhịp bồi dự phòng ở 240ms nếu bảng vẫn mở), kiểm tra lại giá trị và bấm nút "Xác Định"
+                    function confirmAndClickSubmit() {
+                        try {
+                            if (!passInput || !passInput.isConnected || !isVisible(passInput)) return;
+                            if (userInput && userInput.isConnected && userInput.value !== username) {
+                                forceFillReactInput(userInput, username);
+                            }
+                            if (passInput.value !== password) {
+                                forceFillReactInput(passInput, password);
+                            }
+                            const submitBtn = findLoginSubmitButton(passInput);
+                            if (submitBtn) {
+                                window.__lastLoginSubmitTime = Date.now();
+                                realClick(submitBtn);
+                                if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                                    window.AndroidBridge.onGameLog(tabIdx, "Đã ấn [Xác Định] đăng nhập: " + username);
+                                }
+                            }
+                            try {
+                                passInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
+                                passInput.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
+                            } catch(e) {}
+                            if (passInput.form) {
+                                try {
+                                    if (typeof passInput.form.requestSubmit === 'function') {
+                                        passInput.form.requestSubmit();
+                                    } else {
+                                        passInput.form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+                                    }
+                                } catch(e) {}
+                            }
+                        } catch(e) {}
+                    }
+
+                    setTimeout(confirmAndClickSubmit, 65);
+                    setTimeout(function() {
+                        if (Date.now() - (window.__lastLoginSubmitTime || 0) >= 220) {
+                            confirmAndClickSubmit();
+                        }
+                    }, 250);
+
+                    return "FILLED_AND_CLICKED_XAC_DINH";
+                }
+
+                // =========================================================================
+                // BƯỚC 0: ƯU TIÊN XỬ LÝ HỘP THOẠI TRANH CHẤP PHIÊN / QUY ĐỊNH NẾU ĐANG HIỂN THỊ
+                // =========================================================================
+                const playHereBtn = findBestButtonByText(function(txtNA, rawTxt) {
+                    if (rawTxt === 'Chơi ở đây' || rawTxt === 'Chơi ở tab này' ||
+                        rawTxt.includes('Chơi ở đây') || rawTxt.includes('Chơi ở tab này') ||
+                        rawTxt.includes('Tiếp tục ở đây') || rawTxt.includes('Kết nối lại')) {
+                        return 100;
+                    }
+                    return -1;
+                });
+                if (playHereBtn) {
+                    realClick(playHereBtn);
+                    if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                        window.AndroidBridge.onGameLog(tabIdx, "⚡ Đã tự động chọn [Chơi ở đây] để tiếp tục chạy game");
+                    }
+                    return "CLICKED_PLAY_HERE";
+                }
+
+                const agreeBtn = findBestButtonByText(function(txtNA) {
+                    if (txtNA === 'toi dong tinh' || txtNA === 'dong tinh' || txtNA === 'toi da hieu') {
+                        return 100;
+                    }
+                    return -1;
+                });
+                if (agreeBtn) {
+                    realClick(agreeBtn);
+                    if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                        window.AndroidBridge.onGameLog(tabIdx, "Đã nhấn [Tôi Đồng Tình]");
+                    }
+                    return "CLICKED_AGREE";
+                }
+
+                // =========================================================================
+                // BƯỚC 1: NẾU KHUNG "ĐĂNG NHẬP" ĐÃ MỞ (CÓ Ô TÀI KHOẢN & MẬT MÃ) -> ĐIỀN & ẤN "XÁC ĐỊNH"
+                // =========================================================================
+                const loginModalResult = tryFillAndSubmitLoginModal();
+                if (loginModalResult !== null) {
+                    return loginModalResult;
+                }
+
+                // =========================================================================
+                // BƯỚC 2: NẾU ĐANG Ở MÀN HÌNH CHỜ BAN ĐẦU -> ẤN NÚT "BẮT ĐẦU TRÒ CHƠI"
+                // (Trước khi vào khu vực đăng nhập phải ấn "Bắt Đầu Trò Chơi")
+                // =========================================================================
+                const startGameBtn = findBestButtonByText(function(txtNA) {
+                    if (txtNA === 'bat dau tro choi') return 120;
+                    if (txtNA.includes('bat dau tro choi')) return 90;
+                    return -1;
+                });
+
+                if (startGameBtn) {
+                    realClick(startGameBtn);
+                    if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                        window.AndroidBridge.onGameLog(tabIdx, "Đã nhấn [Bắt Đầu Trò Chơi] -> Mở khung Đăng Nhập");
+                    }
+                    // Đón lõng khung Đăng Nhập ngay khi vừa render ở các mốc 180ms, 380ms, 650ms, 950ms
+                    [180, 380, 650, 950].forEach(function(delayMs) {
+                        setTimeout(function() {
+                            try {
+                                tryFillAndSubmitLoginModal();
+                            } catch(e) {}
+                        }, delayMs);
+                    });
+                    return "CLICKED_BAT_DAU_TRO_CHOI";
+                }
+
+                // Kiểm tra các nút mở đăng nhập / vào game khác nếu có
+                const otherOpenBtn = findBestButtonByText(function(txtNA) {
+                    if (txtNA === 'vao game' || txtNA === 'vao giang ho' || txtNA === 'bat dau' ||
+                        txtNA === 'vao tro choi' || txtNA === 'choi ngay') {
+                        return 80;
+                    }
+                    return -1;
+                });
+                if (otherOpenBtn) {
+                    realClick(otherOpenBtn);
+                    [180, 380, 650].forEach(function(delayMs) {
+                        setTimeout(function() {
+                            try { tryFillAndSubmitLoginModal(); } catch(e) {}
+                        }, delayMs);
+                    });
+                    return "CLICKED_OPEN_LOGIN";
+                }
+
+                // =========================================================================
+                // BƯỚC 3: KIỂM TRA ĐÃ VÀO TRONG GAME THỰC SỰ HAY CHƯA
+                // Chỉ báo IN_GAME khi KHÔNG còn nút "Bắt Đầu Trò Chơi" / "Đăng Ký Tài Khoản"
+                // và KHÔNG còn khung "Đăng Nhập" che bên trên!
+                // =========================================================================
+                const authLandingCheck = findBestButtonByText(function(txtNA) {
+                    if (txtNA === 'bat dau tro choi' || txtNA === 'dang ky tai khoan' || txtNA === 'quen mat ma' || txtNA === 'xac dinh') {
+                        return 100;
+                    }
+                    return -1;
+                });
+                const bodyText = document.body ? (document.body.innerText || '') : '';
+                const bodyNA = noAccent(bodyText);
+                const hasAuthModalText = bodyNA.includes('bat dau tro choi') ||
+                                         bodyNA.includes('dang ky tai khoan') ||
+                                         bodyNA.includes('chua co tai khoan') ||
+                                         bodyNA.includes('moi tai khoan 1 nhan vat') ||
+                                         bodyNA.includes('nho tai khoan') ||
+                                         bodyNA.includes('hien mat ma');
+                const isAuthOverlayStillVisible = (authLandingCheck !== null) || (getVisibleEditableInputs().length >= 1) || hasAuthModalText;
+
+                if (!isAuthOverlayStillVisible) {
+                    const hasBattleMenu = (bodyText.includes('Hành trang') && (bodyText.includes('Kỹ năng') || bodyText.includes('Võ công') || bodyText.includes('Hệ thống'))) ||
+                                         bodyText.includes('Chế độ :') || 
+                                         bodyText.includes('Chế độ:') ||
+                                         bodyText.includes('Chế Độ :') ||
+                                         bodyText.includes('Chế Độ:');
+
+                    if (hasBattleMenu) {
+                        if (window.AndroidBridge && window.AndroidBridge.onInGameDetected) {
+                            window.AndroidBridge.onInGameDetected(tabIdx);
+                        }
+                        return "IN_GAME";
+                    }
+                }
+
+                return "WAITING_SCREEN";
+            } catch (err) {
+                if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                    window.AndroidBridge.onGameLog($tabIndex, "Lỗi script: " + err.message);
+                }
+                return "ERROR: " + err.message;
+            }
+        })($safeUserJson, $safePassJson);
+        """.trimIndent()
+    }
+
+    // Bộ Canh Gác & Quét Thông Số Định Kỳ (mỗi 2500ms khi đã ở trong game)
+    fun buildPeriodicWatchdogAndScanScript(tabIndex: Int): String {
+        return """
+        (function() {
+            try {
+                const tabIdx = $tabIndex;
+
+                function norm(str) {
+                    return (str || '').toString().toLowerCase().normalize('NFC').replace(/\s+/g, ' ').trim();
+                }
+
+                function noAccent(str) {
+                    return norm(str)
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .replace(/đ/g, 'd');
+                }
+
+                function isVisible(el) {
+                    if (!el || !el.isConnected) return false;
+                    if ((el.type || '').toLowerCase() === 'hidden') return false;
+                    let cur = el;
+                    while (cur && cur !== document.body && cur !== document.documentElement) {
+                        if (cur.hidden === true) return false;
+                        try {
+                            const style = window.getComputedStyle(cur);
+                            if (style && (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || parseFloat(style.opacity) === 0)) {
+                                return false;
+                            }
+                        } catch(e) {}
+                        cur = cur.parentElement;
+                    }
+                    const tag = (el.tagName || '').toUpperCase();
+                    const isFormOrBtn = (tag === 'INPUT' || tag === 'BUTTON' || tag === 'SELECT' || tag === 'TEXTAREA' || el.getAttribute('role') === 'button');
+                    try {
+                        const rect = el.getBoundingClientRect();
+                        if (isFormOrBtn) {
+                            if (rect.height > 0 || rect.width > 0 || el.offsetParent !== null) return true;
+                            if (el.parentElement) {
+                                const pRect = el.parentElement.getBoundingClientRect();
+                                return pRect.height > 0 || pRect.width > 0;
+                            }
+                        }
+                        return rect.width > 1 && rect.height > 1;
+                    } catch(e) {
+                        return el.offsetParent !== null;
+                    }
+                }
+
+                function realClick(el) {
+                    if (!el) return;
+                    const target = el.closest('button, [role="button"], a, input[type="button"], input[type="submit"]') || el;
+                    try {
+                        const rect = target.getBoundingClientRect();
+                        const cx = rect.left + Math.max(2, rect.width / 2);
+                        const cy = rect.top + Math.max(2, rect.height / 2);
+                        ['pointerdown', 'mousedown', 'pointerup', 'mouseup'].forEach(type => {
+                            try {
+                                target.dispatchEvent(new MouseEvent(type, {
+                                    view: window, bubbles: true, cancelable: true, clientX: cx, clientY: cy, buttons: 1
+                                }));
+                            } catch(e) {}
+                        });
+                    } catch(e) {}
+                    if (typeof target.click === 'function') {
+                        try { target.click(); } catch(e) {}
+                    }
+                }
+
+                function cleanText(txt) {
+                    if (!txt) return "";
+                    return txt.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
+                }
+
+                const bodyText = document.body ? (document.body.innerText || '') : '';
+                const bodyNA = noAccent(bodyText);
+                const allElements = Array.from(document.querySelectorAll('button, [role="button"], a, div, span, p, label'));
+
+                // 1. TỰ ĐỘNG BẤM "CHƠI Ở ĐÂY" / "CHƠI Ở TAB NÀY" NẾU CÓ TRANH CHẤP PHIÊN
+                // Chỉ gọi isVisible(el) khi chuỗi văn bản đã khớp để tránh gây giật lag trên điện thoại
+                for (const el of allElements) {
+                    const txt = (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
+                    if (!txt || txt.length > 35) continue;
+                    if (txt === 'Chơi ở đây' || txt === 'Chơi ở tab này' ||
+                        txt.includes('Chơi ở đây') || txt.includes('Chơi ở tab này') || 
+                        txt.includes('Tiếp tục ở đây') || txt.includes('Kết nối lại') ||
+                        txt === 'Thử lại') {
+                        if (!isVisible(el)) continue;
+                        realClick(el);
+                        if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                            window.AndroidBridge.onGameLog(tabIdx, "⚡ Đã tự bấm [" + txt + "] tiếp tục phiên chơi");
+                        }
+                        return "CLICKED_PLAY_HERE";
+                    }
+                }
+
+                // Nếu thấy tiêu đề cảnh báo tranh chấp phiên
+                if (bodyText.includes('Tài khoản đang mở ở nơi khác') || bodyText.includes('đang mở ở máy / tab khác')) {
+                    for (const el of allElements) {
+                        const txt = (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
+                        if (!txt || txt.length > 35) continue;
+                        if (txt.includes('Chơi ở đây') || txt.includes('Chơi ở tab') || txt.includes('Tiếp tục')) {
+                            if (!isVisible(el)) continue;
+                            realClick(el);
+                            if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                                window.AndroidBridge.onGameLog(tabIdx, "⚡ Tranh chấp phiên: Đã chọn [" + txt + "]");
+                            }
+                            return "CLICKED_PLAY_HERE";
+                        }
+                    }
+                }
+
+                // 2. PHÁT HIỆN ĐANG Ở MÀN HÌNH "BẮT ĐẦU TRÒ CHƠI" HOẶC KHUNG "ĐĂNG NHẬP" (Bản 1031)
+                let isStartOrLoginVisible = bodyNA.includes('bat dau tro choi') ||
+                                            bodyNA.includes('dang ky tai khoan') ||
+                                            bodyNA.includes('chua co tai khoan') ||
+                                            bodyNA.includes('moi tai khoan 1 nhan vat') ||
+                                            bodyNA.includes('nho tai khoan') ||
+                                            bodyNA.includes('hien mat ma');
+
+                if (!isStartOrLoginVisible) {
+                    for (const el of allElements) {
+                        const rawTxt = (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
+                        if (!rawTxt || rawTxt.length > 35) continue;
+                        const tNA = noAccent(rawTxt);
+                        if (tNA === 'bat dau tro choi' || tNA === 'dang ky tai khoan' || tNA === 'xac dinh') {
+                            if (isVisible(el)) {
+                                isStartOrLoginVisible = true;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (!isStartOrLoginVisible) {
+                    const visibleAuthInputs = Array.from(document.querySelectorAll('input')).filter(inp => {
+                        if (inp.readOnly || inp.disabled) return false;
+                        const t = (inp.type || '').toLowerCase();
+                        if (['hidden', 'checkbox', 'radio', 'button', 'submit'].includes(t)) return false;
+                        if (!isVisible(inp)) return false;
+                        if (t === 'password') return true;
+                        const pTxt = inp.parentElement ? (inp.parentElement.textContent || inp.parentElement.innerText || '') : '';
+                        const meta = noAccent((inp.placeholder || '') + ' ' + (inp.name || '') + ' ' + (inp.id || '') + ' ' + pTxt);
+                        return meta.includes('mat ma') || meta.includes('mat khau') || meta.includes('password') || meta.includes('tai khoan');
+                    });
+                    if (visibleAuthInputs.length > 0) {
+                        isStartOrLoginVisible = true;
+                    }
+                }
+
+                if (isStartOrLoginVisible) {
+                    if (window.AndroidBridge && window.AndroidBridge.onGameKickedDetected) {
+                        window.AndroidBridge.onGameKickedDetected(tabIdx);
+                    }
+                    return "KICKED_DETECTED";
+                }
+
+                // 3. QUÉT THÔNG SỐ NHÂN VẬT & HÀNH TRANG (KHU VỰC 1, 3, 4)
+                let charName = '';
+                let sect = 'Chưa rõ';
+                let level = '0';
+                let expPercent = '0%';
+                let daiHongBao = '0';
+                let hongBao = '0';
+                let thapRecord = 'Chưa đi';
+                let bossHoangKim = '0';
+                let daTauQuest = 'Chưa nhận';
+
+                const potentialNameEls = Array.from(document.querySelectorAll('.player-name, .character-name, .font-bold, .text-yellow-400, .text-amber-400, span, div'));
+                for (const el of potentialNameEls) {
+                    if (el.children && el.children.length > 2) continue;
+                    const txt = cleanText(el.textContent || el.innerText || '');
+                    if (txt.length < 2 || txt.length > 25) continue;
+                    const txtNA = noAccent(txt);
+                    if (!/^\d+$/.test(txt) &&
+                        !txtNA.includes('luc tay') &&
+                        !txtNA.includes('chien luc') &&
+                        !txtNA.includes('che do') &&
+                        !txtNA.includes('may chu') &&
+                        !txtNA.includes('vo lam') &&
+                        !txtNA.includes('tai khoan') &&
+                        !txtNA.includes('mat ma') &&
+                        !txtNA.includes('bat dau') &&
+                        !txtNA.includes('dang ky') &&
+                        !txt.includes('Cấp') && !txt.includes('HP') && !txt.includes('MP') && !txt.includes('EXP')) {
+                        const parentText = el.parentElement ? (el.parentElement.textContent || el.parentElement.innerText || '') : '';
+                        const parentNA = noAccent(parentText);
+                        if ((parentText.includes('Cấp') || parentText.includes('Lv') || parentText.includes('%')) && !parentNA.includes('luc tay 0')) {
+                            if (isVisible(el)) {
+                                charName = txt;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                const sects = ['Thiếu Lâm', 'Thiên Vương', 'Đường Môn', 'Ngũ Độc', 'Nga Mi', 'Thúy Yên', 'Cái Bang', 'Thiên Nhẫn', 'Võ Đang', 'Côn Lôn', 'Đoàn Thị'];
+                for (const s of sects) {
+                    if (bodyText.includes(s)) {
+                        sect = s;
+                        break;
+                    }
+                }
+
+                const levelMatch = bodyText.match(/(?:Cấp|Lv\.?|Level)\s*:?\s*(\d+)/i) || bodyText.match(/(\d{1,3})\s*(?:cấp|level)/i);
+                if (levelMatch) level = levelMatch[1];
+                const expMatch = bodyText.match(/(\d+(?:\.\d+)?)\s*%/);
+                if (expMatch) expPercent = expMatch[1] + '%';
+
+                const daiHbMatch = bodyText.match(/Đại\s*hồng\s*bao\s*:?\s*(\d+)/i) || bodyText.match(/🧧\s*Đại\s*:?\s*(\d+)/i);
+                if (daiHbMatch) daiHongBao = daiHbMatch[1];
+
+                const hbMatch = bodyText.match(/(?:Hồng\s*bao|Bao\s*lì\s*xì)\s*:?\s*(\d+)/i) || bodyText.match(/🧧\s*:?\s*(\d+)/i);
+                if (hbMatch) hongBao = hbMatch[1];
+
+                const thapMatch = bodyText.match(/(?:Kỷ\s*lục\s*tầng\s*tháp|Tầng\s*tháp|Tháp)\s*:?\s*([^\n,]{1,20})/i);
+                if (thapMatch) thapRecord = cleanText(thapMatch[1]);
+
+                const bossMatch = bodyText.match(/(?:Boss\s*Hoàng\s*Kim|Boss\s*HK)\s*:?\s*(\d+)/i);
+                if (bossMatch) bossHoangKim = bossMatch[1];
+
+                const daTauMatch = bodyText.match(/(?:Dã\s*Tẩu|Nhiệm\s*vụ\s*Dã\s*Tẩu)\s*:?\s*([^\n,]{1,25})/i);
+                if (daTauMatch) daTauQuest = cleanText(daTauMatch[1]);
+
+                if (window.AndroidBridge && window.AndroidBridge.onGameStateScanned) {
+                    window.AndroidBridge.onGameStateScanned(tabIdx, JSON.stringify({
+                        isOnline: true,
+                        characterName: charName || 'Nhân vật ' + (tabIdx + 1),
+                        sect: sect,
+                        level: level,
+                        expPercent: expPercent,
+                        daiHongBao: daiHongBao,
+                        hongBao: hongBao,
+                        thapRecord: thapRecord,
+                        bossHoangKim: bossHoangKim,
+                        daTauQuest: daTauQuest,
+                        lastStatus: '🟢 Đang chạy ổn định'
+                    }));
+                }
+                return "SCANNED_SUCCESS";
+            } catch(e) {
+                return "ERROR: " + e.message;
+            }
+        })();
+        """.trimIndent()
+    }
+
+    fun buildDomGarbageCollectionScript(): String {
+        return """
+        (function() {
+            try {
+                const chatSelectors = ['.chat-messages', '.log-container', '#chat-box', '.combat-log', '[class*="chat"]', '[class*="message"]'];
+                for (const selector of chatSelectors) {
+                    const containers = document.querySelectorAll(selector);
+                    containers.forEach(container => {
+                        const items = Array.from(container.children);
+                        if (items.length > 30) {
+                            const toRemove = items.length - 30;
+                            for (let i = 0; i < toRemove; i++) {
+                                if (items[i] && items[i].remove) {
+                                    items[i].remove();
+                                }
+                            }
+                        }
+                    });
+                }
+                // Dọn các hiệu ứng số sát thương nổi (floating text) bị tồn đọng nếu có
+                const floatingSelectors = ['.floating-text', '.damage-text', '.damage-number', '[class*="floating"]'];
+                for (const sel of floatingSelectors) {
+                    const nodes = document.querySelectorAll(sel);
+                    if (nodes.length > 20) {
+                        for (let i = 0; i < nodes.length - 10; i++) {
+                            try { nodes[i].remove(); } catch(e) {}
+                        }
+                    }
+                }
+            } catch(e) {}
+        })();
+        """.trimIndent()
+    }
+
+    fun buildFpsLimiterScript(fps: Int): String {
+        val intervalMs = if (fps <= 30) 33 else 16
+        return """
+        (function() {
+            window.__targetFrameIntervalMs = $intervalMs;
+            if (window.__fpsThrottlerInjected) return;
+            window.__fpsThrottlerInjected = true;
+
+            // =========================================================================
+            // 1. GIẢ LẬP TRANG LUÔN HIỂN THỊ (CHỐNG TẠM DỪNG VẼ KHI CHUYỂN APP KHÁC)
+            // Ngăn game nhận sự kiện ẩn tab (visibilitychange / blur) gây tích tụ gói tin
+            // và nhảy vị trí nhân vật khi quay lại game.
+            // =========================================================================
+            try {
+                Object.defineProperty(document, 'hidden', { get: function() { return false; }, configurable: true });
+                Object.defineProperty(document, 'visibilityState', { get: function() { return 'visible'; }, configurable: true });
+                Object.defineProperty(document, 'webkitHidden', { get: function() { return false; }, configurable: true });
+                Object.defineProperty(document, 'webkitVisibilityState', { get: function() { return 'visible'; }, configurable: true });
+                document.hasFocus = function() { return true; };
+
+                const blockBgEvents = function(e) {
+                    try {
+                        e.stopImmediatePropagation();
+                        e.stopPropagation();
+                    } catch(err) {}
+                };
+                window.addEventListener('visibilitychange', blockBgEvents, true);
+                document.addEventListener('visibilitychange', blockBgEvents, true);
+                document.addEventListener('webkitvisibilitychange', blockBgEvents, true);
+                window.addEventListener('blur', blockBgEvents, true);
+                window.addEventListener('pagehide', blockBgEvents, true);
+            } catch(e) {}
+
+            // =========================================================================
+            // 2. BỘ ĐIỀU PHỐI KHUNG HÌNH HYBRID (VSYNC + BACKGROUND TIMER + ANTI-RUBBERBAND)
+            // - Khi đang mở app: dùng VSync mượt theo tốc độ khóa FPS (30/60 FPS).
+            // - Khi chuyển sang app khác (Android ngắt VSync): tự động chuyển sang bộ nhịp
+            //   ngầm 20 FPS bằng setTimeout để nhân vật tiếp tục di chuyển thời gian thực,
+            //   không bị dồn hàng đợi gói tin WebSocket.
+            // - Kẹp (Clamp) bước nhảy thời gian (delta time <= 50ms) để khi quay lại app
+            //   tuyệt đối KHÔNG bị tua nhanh, giật hình hay nhảy vị trí!
+            // =========================================================================
+            let lastFrameTime = performance.now();
+            let virtualTime = lastFrameTime;
+            const originalRAF = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null;
+
+            window.requestAnimationFrame = function(callback) {
+                const targetInterval = window.__targetFrameIntervalMs || 33;
+                const bgInterval = 50; // 20 nhịp/giây khi chạy ngầm ở app khác
+                let executed = false;
+
+                function invokeSmoothly(rawNow) {
+                    if (executed) return;
+                    executed = true;
+
+                    const now = (typeof rawNow === 'number' && rawNow > 0) ? rawNow : performance.now();
+                    const elapsed = now - lastFrameTime;
+                    lastFrameTime = now;
+
+                    // Chống nhảy vị trí (Anti-Jump): Nếu vừa chuyển từ app khác về và có độ trễ lớn,
+                    // giới hạn bước tiến thời gian tối đa 50ms thay vì nhảy vọt hàng chục giây!
+                    const safeDelta = (elapsed > 0 && elapsed <= 50) ? elapsed : Math.min(Math.max(elapsed, 16), 50);
+                    virtualTime += safeDelta;
+
+                    try {
+                        callback(virtualTime);
+                    } catch(err) {}
+                }
+
+                // Nếu đang chạy ngầm ở app khác, dùng trực tiếp bộ đếm setTimeout để giữ game luôn chạy thực tế
+                if (window.__isAppInBackground || !originalRAF) {
+                    return setTimeout(function() {
+                        invokeSmoothly(performance.now());
+                    }, bgInterval);
+                }
+
+                // Khi ở tiền cảnh: kết hợp originalRAF (VSync) và phao cứu sinh fallback nếu VSync bị ngắt đột ngột
+                const nowCheck = performance.now();
+                const waitMs = Math.max(0, targetInterval - (nowCheck - lastFrameTime));
+
+                const fallbackTimer = setTimeout(function() {
+                    invokeSmoothly(performance.now());
+                }, Math.max(waitMs + 45, 75));
+
+                if (waitMs <= 4) {
+                    originalRAF(function(ts) {
+                        clearTimeout(fallbackTimer);
+                        invokeSmoothly(ts);
+                    });
+                } else {
+                    setTimeout(function() {
+                        if (executed) return;
+                        originalRAF(function(ts) {
+                            clearTimeout(fallbackTimer);
+                            invokeSmoothly(ts);
+                        });
+                    }, waitMs);
+                }
+
+                return fallbackTimer;
+            };
+
+            // =========================================================================
+            // 3. KÍCH HOẠT AUDIO CONTEXT IM LẶNG ĐỂ CHROMIUM KHÔNG ĐÓNG BĂNG RENDERER NGẦM
+            // =========================================================================
+            function initSilentKeepAliveAudio() {
+                if (window.__silentAudioStarted) return;
+                try {
+                    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+                    if (!AudioCtx) return;
+                    const ctx = new AudioCtx();
+                    const osc = ctx.createOscillator();
+                    const gain = ctx.createGain();
+                    gain.gain.value = 0.00001; // Hoàn toàn im lặng
+                    osc.connect(gain);
+                    gain.connect(ctx.destination);
+                    osc.start(0);
+                    window.__silentAudioCtx = ctx;
+                    window.__silentAudioStarted = true;
+                } catch(e) {}
+            }
+            window.addEventListener('pointerdown', initSilentKeepAliveAudio, { once: true, passive: true });
+            window.addEventListener('touchstart', initSilentKeepAliveAudio, { once: true, passive: true });
+        })();
+        """.trimIndent()
+    }
+
+    fun buildSyncAutoModeScript(modeText: String): String {
+        val safeModeJson = quote(modeText)
+        return """
+        (function(rawMode) {
+            try {
+                function norm(str) {
+                    return (str || '').toString().toLowerCase().normalize('NFC').replace(/\s+/g, ' ').trim();
+                }
+
+                function noAccent(str) {
+                    return norm(str)
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .replace(/đ/g, 'd');
+                }
+
+                function realClick(el) {
+                    if (!el) return;
+                    try {
+                        const rect = el.getBoundingClientRect();
+                        const cx = rect.left + rect.width / 2;
+                        const cy = rect.top + rect.height / 2;
+                        ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+                            try {
+                                el.dispatchEvent(new MouseEvent(type, {
+                                    view: window, bubbles: true, cancelable: true, clientX: cx, clientY: cy, buttons: 1
+                                }));
+                            } catch(e) {}
+                        });
+                    } catch(e) {}
+                    if (typeof el.click === 'function') {
+                        try { el.click(); } catch(e) {}
+                    }
+                }
+
+                const reqNoAccent = noAccent(rawMode);
+                // Chuẩn hóa chính xác Title Case giống hệt cách "Phó Bản" hoạt động trong game:
+                // "Nhiệm Vụ", "Phó Bản", "Luyện Công"
+                let titleCaseMode = rawMode;
+                let lowerMode = norm(rawMode);
+                let valueAliases = [];
+
+                if (reqNoAccent.includes('nhiem vu') || reqNoAccent.includes('da tau') || reqNoAccent.includes('quest')) {
+                    titleCaseMode = 'Nhiệm Vụ';
+                    lowerMode = 'nhiệm vụ';
+                    valueAliases = ['nhiem vu', 'nhiemvu', 'nhiem_vu', 'quest', 'task', 'datau', 'da tau'];
+                } else if (reqNoAccent.includes('pho ban') || reqNoAccent.includes('dungeon')) {
+                    titleCaseMode = 'Phó Bản';
+                    lowerMode = 'phó bản';
+                    valueAliases = ['pho ban', 'phoban', 'pho_ban', 'dungeon', 'instance'];
+                } else if (reqNoAccent.includes('luyen cong') || reqNoAccent.includes('train') || reqNoAccent.includes('grind')) {
+                    titleCaseMode = 'Luyện Công';
+                    lowerMode = 'luyện công';
+                    valueAliases = ['luyen cong', 'luyencong', 'luyen_cong', 'train', 'training', 'grind', 'farm'];
+                }
+
+                const targetNoAccent = noAccent(titleCaseMode);
+
+                function isMatchingOption(textStr, valStr) {
+                    const tRaw = (textStr || '').trim();
+                    const vRaw = (valStr || '').trim();
+                    if (tRaw.includes(titleCaseMode) || vRaw.includes(titleCaseMode)) return true;
+                    const tNorm = norm(tRaw);
+                    const vNorm = norm(vRaw);
+                    if (tNorm.includes(lowerMode) || vNorm.includes(lowerMode)) return true;
+                    const tNA = noAccent(tRaw);
+                    const vNA = noAccent(vRaw);
+                    if (tNA.includes(targetNoAccent) || vNA.includes(targetNoAccent)) return true;
+                    return valueAliases.some(alias => tNA.includes(alias) || vNA === alias || vNA.includes(alias));
+                }
+
+                // =========================================================================
+                // CƠ CHẾ 1 (CHUẨN NHẤT): TÌM THẺ <select> CỦA "Chế Độ:" / "Chế độ:"
+                // Lưu ý: Trong game chữ "Chế Độ:" viết hoa chữ Đ và các option viết hoa
+                // chữ cái đầu ("⚔️ Luyện Công", "⚔️ Phó Bản", "📜 Nhiệm Vụ").
+                // =========================================================================
+                const selects = Array.from(document.querySelectorAll('select'));
+                let targetSelect = null;
+
+                // Ưu tiên 1A: Quét <select> có chứa các option Nhiệm Vụ / Phó Bản / Luyện Công
+                for (const s of selects) {
+                    const opts = Array.from(s.options || []);
+                    const isModeSelect = opts.some(o => {
+                        const na = noAccent(o.text || o.textContent || '');
+                        const va = noAccent(o.value || '');
+                        return na.includes('pho ban') || na.includes('luyen cong') || na.includes('nhiem vu') ||
+                               va.includes('phoban') || va.includes('luyencong') || va.includes('nhiemvu') ||
+                               va.includes('dungeon') || va.includes('train') || va.includes('quest');
+                    });
+                    if (isModeSelect) {
+                        targetSelect = s;
+                        break;
+                    }
+                }
+
+                // Ưu tiên 1B: Quét <select> mà phần tử cha có chữ "Chế Độ" hoặc "Chế độ" (không phân biệt hoa/thường)
+                if (!targetSelect) {
+                    for (const s of selects) {
+                        const parentText = s.parentElement ? s.parentElement.innerText : '';
+                        const containerText = s.closest('label, div') ? s.closest('label, div').innerText : '';
+                        if (noAccent(parentText).includes('che do') || noAccent(containerText).includes('che do')) {
+                            targetSelect = s;
+                            break;
+                        }
+                    }
+                }
+
+                if (targetSelect) {
+                    const options = Array.from(targetSelect.options);
+                    for (let i = 0; i < options.length; i++) {
+                        const opt = options[i];
+                        if (isMatchingOption(opt.text || opt.textContent, opt.value)) {
+                            targetSelect.selectedIndex = i;
+                            opt.selected = true;
+
+                            // Ép cập nhật giá trị chuẩn React/Vue + Native DOM giống hệt cơ chế Phó Bản
+                            if (targetSelect._valueTracker) {
+                                try { targetSelect._valueTracker.setValue(''); } catch(e) {}
+                            }
+                            try {
+                                const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value')?.set;
+                                if (nativeSetter) {
+                                    nativeSetter.call(targetSelect, opt.value);
+                                } else {
+                                    targetSelect.value = opt.value;
+                                }
+                            } catch(e) {
+                                targetSelect.value = opt.value;
+                            }
+                            targetSelect.value = opt.value;
+                            targetSelect.dispatchEvent(new Event('input', { bubbles: true }));
+                            targetSelect.dispatchEvent(new Event('change', { bubbles: true }));
+                            return "SELECTED_OPTION:" + (opt.text || opt.value);
+                        }
+                    }
+                }
+
+                // =========================================================================
+                // CƠ CHẾ 2: NẾU CHẾ ĐỘ LÀ NÚT BẤM / CUSTOM DROPDOWN TRONG DOM
+                // Loại trừ thanh menu dưới đáy màn hình (Nhân vật | Hành trang | Võ công | Lò rèn | Nhiệm vụ | Tổ đội | Hệ thống)
+                // để khi bấm "Nhiệm Vụ" KHÔNG bị bấm nhầm vào bảng Nhiệm vụ ở đáy màn hình!
+                // =========================================================================
+                function isBottomMenuBarElement(el) {
+                    let cur = el;
+                    for (let depth = 0; depth < 4 && cur; depth++) {
+                        const t = noAccent(cur.innerText || '');
+                        if ((t.includes('hanh trang') && t.includes('he thong')) ||
+                            (t.includes('vo cong') && t.includes('lo ren')) ||
+                            (t.includes('nhan vat') && t.includes('to doi'))) {
+                            return true;
+                        }
+                        cur = cur.parentElement;
+                    }
+                    return false;
+                }
+
+                const candidates = Array.from(document.querySelectorAll('button, div[role="button"], li, option, span, a, div'));
+
+                // Bước 2A: Tìm phần tử khớp trực tiếp với Title Case ("Nhiệm Vụ", "Phó Bản", "Luyện Công") giống hệt "Phó Bản"
+                // nhưng không phải là nút ở thanh menu đáy và không phải là nhãn bao ngoài chứa cả cụm "Chế Độ:"
+                for (const b of candidates) {
+                    if (b.children && b.children.length > 2) continue;
+                    const txt = (b.innerText || b.textContent || '').trim();
+                    if (!txt || txt.length > 35) continue;
+                    if (isBottomMenuBarElement(b)) continue;
+                    const txtNA = noAccent(txt);
+                    if (txtNA.includes('che do')) continue;
+
+                    if (txt === titleCaseMode || txt.includes(titleCaseMode) || txtNA === targetNoAccent || txtNA.includes(targetNoAccent)) {
+                        realClick(b);
+                        return "CLICKED_DIRECT:" + txt;
+                    }
+                }
+
+                // Bước 2B: Nếu "Chế Độ: ⚔️ Luyện Công ▾" là một nút đóng/mở menu (Custom Dropdown Trigger)
+                // Kiểm tra xem nút "Chế Độ:" hiện tại đã ở đúng chế độ chưa; nếu chưa thì mở menu rồi chọn!
+                let modeTrigger = null;
+                for (const el of candidates) {
+                    const txt = (el.innerText || el.textContent || '').trim();
+                    const txtNA = noAccent(txt);
+                    if (txtNA.startsWith('che do:') || txtNA.startsWith('che do :')) {
+                        if (txt.length <= 45) {
+                            modeTrigger = el;
+                            break;
+                        }
+                    }
+                }
+
+                if (modeTrigger) {
+                    const currentTriggerNA = noAccent(modeTrigger.innerText || modeTrigger.textContent || '');
+                    if (currentTriggerNA.includes(targetNoAccent)) {
+                        return "ALREADY_IN_MODE:" + titleCaseMode;
+                    }
+                    // Mở dropdown "Chế Độ:" và chọn mục tương ứng sau 80ms
+                    realClick(modeTrigger);
+                    setTimeout(() => {
+                        try {
+                            const popupItems = Array.from(document.querySelectorAll('button, div[role="button"], li, span, a, div'));
+                            for (const item of popupItems) {
+                                if (item === modeTrigger) continue;
+                                if (item.children && item.children.length > 2) continue;
+                                const t = (item.innerText || item.textContent || '').trim();
+                                if (!t || t.length > 35) continue;
+                                if (isBottomMenuBarElement(item)) continue;
+                                const tNA = noAccent(t);
+                                if (tNA.includes('che do')) continue;
+                                if (t === titleCaseMode || t.includes(titleCaseMode) || tNA.includes(targetNoAccent)) {
+                                    realClick(item);
+                                    break;
+                                }
+                            }
+                        } catch(e) {}
+                    }, 80);
+                    return "OPENED_TRIGGER_AND_SELECTING:" + titleCaseMode;
+                }
+
+                return "NOT_FOUND";
+            } catch(e) {
+                return "ERROR:" + e.message;
+            }
+        })($safeModeJson);
+        """.trimIndent()
+    }
+
+    // Đồng bộ bật/tắt "Màn hình đen" cho cả 4 Tab theo trình tự: Hệ thống (⚙️) -> Hiển Thị -> Màn hình đen
+    fun buildSyncBlackScreenScript(enabled: Boolean): String {
+        val targetState = if (enabled) "true" else "false"
+        return """
+        (function(targetEnabled) {
+            try {
+                function norm(str) {
+                    return (str || '').toString().toLowerCase().normalize('NFC').replace(/\s+/g, ' ').trim();
+                }
+
+                function noAccent(str) {
+                    return norm(str)
+                        .normalize('NFD')
+                        .replace(/[\u0300-\u036f]/g, '')
+                        .replace(/đ/g, 'd');
+                }
+
+                function realClick(el) {
+                    if (!el) return;
+                    const target = el.closest('button, [role="button"], [role="tab"], a, label') || el;
+                    try {
+                        const rect = target.getBoundingClientRect();
+                        const cx = rect.left + rect.width / 2;
+                        const cy = rect.top + rect.height / 2;
+                        ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click'].forEach(type => {
+                            try {
+                                target.dispatchEvent(new MouseEvent(type, {
+                                    view: window, bubbles: true, cancelable: true, clientX: cx, clientY: cy, buttons: 1
+                                }));
+                            } catch(e) {}
+                        });
+                    } catch(e) {}
+                    if (typeof target.click === 'function') {
+                        try { target.click(); } catch(e) {}
+                    }
+                }
+
+                // Tìm ô checkbox đứng trước dòng "Màn hình đen" trong mục Hệ thống -> Hiển Thị
+                function findBlackScreenCheckbox() {
+                    const checkboxes = Array.from(document.querySelectorAll('input[type="checkbox"]'));
+                    for (const cb of checkboxes) {
+                        const labelEl = cb.closest('label');
+                        const labelText = noAccent(labelEl ? labelEl.innerText : '');
+                        const parentText = noAccent(cb.parentElement ? cb.parentElement.innerText : '');
+                        const nextText = noAccent(cb.nextElementSibling ? cb.nextElementSibling.innerText : '');
+                        if (labelText.includes('man hinh den') || parentText.includes('man hinh den') || nextText.includes('man hinh den')) {
+                            return cb;
+                        }
+                        const grandParent = cb.parentElement ? cb.parentElement.parentElement : null;
+                        const grandParentText = noAccent(grandParent ? grandParent.innerText : '');
+                        if (grandParentText.includes('man hinh den') && grandParentText.length < 200) {
+                            return cb;
+                        }
+                    }
+                    return null;
+                }
+
+                // Tích hoặc bỏ tích ô checkbox chuẩn React/DOM (không bị click đúp làm đảo ngược trạng thái)
+                function setCheckboxState(cb, desired) {
+                    if (!cb) return false;
+                    if (Boolean(cb.checked) === Boolean(desired)) {
+                        return true;
+                    }
+                    try { cb.focus(); } catch(e) {}
+                    try { cb.click(); } catch(e) {}
+                    if (Boolean(cb.checked) === Boolean(desired)) {
+                        return true;
+                    }
+                    const parentLabel = cb.closest('label');
+                    if (parentLabel) {
+                        try { parentLabel.click(); } catch(e) {}
+                        if (Boolean(cb.checked) === Boolean(desired)) {
+                            return true;
+                        }
+                    }
+                    try {
+                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'checked')?.set;
+                        if (setter) {
+                            setter.call(cb, desired);
+                        } else {
+                            cb.checked = desired;
+                        }
+                    } catch(e) {
+                        cb.checked = desired;
+                    }
+                    if (cb._valueTracker) {
+                        try { cb._valueTracker.setValue(String(!desired)); } catch(e) {}
+                    }
+                    try { cb.dispatchEvent(new Event('click', { bubbles: true })); } catch(e) {}
+                    try { cb.dispatchEvent(new Event('input', { bubbles: true })); } catch(e) {}
+                    try { cb.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+                    return Boolean(cb.checked) === Boolean(desired);
+                }
+
+                // Nếu bỏ chọn (targetEnabled === false) và đang có lớp phủ "Màn hình đen - bấm vào màn hình để bật hình lại"
+                function tryWakeBlackScreenOverlayIfNeeded() {
+                    if (targetEnabled) return false;
+                    const els = Array.from(document.querySelectorAll('div, canvas, span, p'));
+                    for (const el of els) {
+                        const t = noAccent(el.innerText || el.textContent || '');
+                        if ((t.includes('man hinh den') && t.includes('game van chay')) ||
+                            t.includes('bam vao man hinh de bat')) {
+                            realClick(el);
+                            return true;
+                        }
+                    }
+                    return false;
+                }
+
+                // Tìm nút "Hệ thống" (hình bánh răng ở góc dưới màn hình game)
+                function findHeThongButton() {
+                    const els = Array.from(document.querySelectorAll('button, [role="button"], a, div, span'));
+                    for (const el of els) {
+                        if (el.children && el.children.length > 3) continue;
+                        const t = noAccent(el.innerText || el.textContent || '');
+                        if (t === 'he thong' || (t.includes('he thong') && t.length <= 18)) {
+                            return el;
+                        }
+                    }
+                    return null;
+                }
+
+                // Tìm tab "Hiển Thị" / "Hiển thị" bên trong cửa sổ Hệ thống
+                function findHienThiTab() {
+                    const els = Array.from(document.querySelectorAll('button, [role="tab"], [role="button"], li, a, div, span'));
+                    for (const el of els) {
+                        if (el.children && el.children.length > 3) continue;
+                        const t = noAccent(el.innerText || el.textContent || '');
+                        if (t === 'hien thi' || (t.includes('hien thi') && !t.includes('man hinh') && !t.includes('hieu ung') && t.length <= 20)) {
+                            return el;
+                        }
+                    }
+                    return null;
+                }
+
+                // Bước 0: Nếu bảng Hệ thống -> Hiển Thị đang mở sẵn trên màn hình thì tích/bỏ tích ngay lập tức!
+                const existingCb = findBlackScreenCheckbox();
+                if (existingCb) {
+                    setCheckboxState(existingCb, targetEnabled);
+                    if (!targetEnabled) {
+                        tryWakeBlackScreenOverlayIfNeeded();
+                    }
+                    return "TOGGLED_IMMEDIATELY:" + targetEnabled;
+                }
+
+                // Nếu bỏ chọn và màn hình đang bị che bởi lớp phủ Màn hình đen, đánh thức màn hình trước
+                if (!targetEnabled) {
+                    tryWakeBlackScreenOverlayIfNeeded();
+                }
+
+                // Bước 1: Kiểm tra xem tab "Hiển Thị" đã xuất hiện chưa; nếu chưa thì bấm mở "Hệ thống" (⚙️)
+                const existingHienThi = findHienThiTab();
+                if (existingHienThi) {
+                    realClick(existingHienThi);
+                } else {
+                    const heThongBtn = findHeThongButton();
+                    if (heThongBtn) {
+                        realClick(heThongBtn);
+                    }
+                }
+
+                // Bước 2: Sau 150ms khi bảng Hệ thống mở ra -> Bấm vào tab "Hiển Thị" (hoặc tích luôn nếu đã ở tab Hiển Thị)
+                setTimeout(() => {
+                    try {
+                        let cb = findBlackScreenCheckbox();
+                        if (cb) {
+                            setCheckboxState(cb, targetEnabled);
+                            return;
+                        }
+                        const hienThiTab = findHienThiTab();
+                        if (hienThiTab) {
+                            realClick(hienThiTab);
+                        }
+                        // Bước 3: Sau khi mở tab "Hiển Thị" 150ms -> Tìm ô trắng "Màn hình đen" để tích/bỏ tích
+                        setTimeout(() => {
+                            try {
+                                cb = findBlackScreenCheckbox();
+                                if (cb) {
+                                    setCheckboxState(cb, targetEnabled);
+                                }
+                            } catch(e) {}
+                        }, 150);
+                    } catch(e) {}
+                }, 150);
+
+                return "SEQUENCE_STARTED:" + targetEnabled;
+            } catch(e) {
+                return "ERROR:" + e.message;
+            }
+        })($targetState);
+        """.trimIndent()
+    }
+}
