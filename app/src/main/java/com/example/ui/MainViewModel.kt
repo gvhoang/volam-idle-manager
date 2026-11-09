@@ -42,9 +42,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _layoutMode = MutableStateFlow(ViewLayoutMode.FOUR_COLUMNS)
     val layoutMode: StateFlow<ViewLayoutMode> = _layoutMode.asStateFlow()
 
-    private val _cluster = MutableStateFlow(prefs.getCluster())
-    val cluster: StateFlow<String> = _cluster.asStateFlow()
-
     private val _editingAccount = MutableStateFlow<AccountConfig?>(null)
     val editingAccount: StateFlow<AccountConfig?> = _editingAccount.asStateFlow()
 
@@ -105,11 +102,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (enabled) {
             KeepAliveService.start(getApplication())
         }
-    }
-
-    fun changeCluster(newCluster: String) {
-        _cluster.value = newCluster
-        tabManager.switchCluster(newCluster)
     }
 
     // MODULE 7: Sync auto mode (Nhiệm Vụ, Phó Bản, Luyện Công)

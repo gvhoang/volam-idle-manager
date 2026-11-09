@@ -52,8 +52,6 @@ import com.example.model.ViewLayoutMode
 fun HeaderBar(
     isSidebarVisible: Boolean,
     onToggleSidebar: () -> Unit,
-    currentCluster: String,
-    onChangeCluster: (String) -> Unit,
     networkData: NetworkDataInfo,
     onResetNetworkStats: () -> Unit,
     fps: Int,
@@ -68,7 +66,6 @@ fun HeaderBar(
     val configuration = LocalConfiguration.current
     val isPortrait = configuration.orientation == Configuration.ORIENTATION_PORTRAIT
 
-    var clusterMenuExpanded by remember { mutableStateOf(false) }
     var viewMenuExpanded by remember { mutableStateOf(false) }
     val headerScrollState = rememberScrollState()
 
@@ -94,7 +91,7 @@ fun HeaderBar(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            // Cụm Trái: Nút đóng/mở Sidebar + Tên Game + Chọn Cụm Server
+            // Bên trái: Nút đóng/mở Sidebar + Tên Game
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (!isSidebarVisible || isPortrait) {
                     IconButton(
@@ -123,46 +120,6 @@ fun HeaderBar(
                     softWrap = false
                 )
 
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // Cụm Server Dropdown (MODULE 3)
-                Box {
-                    Surface(
-                        modifier = Modifier
-                            .clickable { clusterMenuExpanded = true }
-                            .testTag("cluster_selector"),
-                        shape = RoundedCornerShape(4.dp),
-                        color = Color(0xFF1E293B),
-                        border = BorderStroke(1.dp, Color(0xFF334155))
-                    ) {
-                        Text(
-                            text = "🌐 $currentCluster ▼",
-                            color = Color(0xFF38BDF8),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            maxLines = 1,
-                            softWrap = false,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
-                        )
-                    }
-
-                    DropdownMenu(
-                        expanded = clusterMenuExpanded,
-                        onDismissRequest = { clusterMenuExpanded = false },
-                        modifier = Modifier.background(Color(0xFF1E293B))
-                    ) {
-                        listOf("Cụm 1", "Cụm 2", "Cụm 3").forEach { cluster ->
-                            DropMenuItemCluster(
-                                cluster = cluster,
-                                currentCluster = currentCluster,
-                                onSelect = {
-                                    onChangeCluster(cluster)
-                                    clusterMenuExpanded = false
-                                }
-                            )
-                        }
-                    }
-                }
             }
 
             Spacer(modifier = Modifier.width(8.dp))
@@ -202,27 +159,6 @@ fun HeaderBar(
             }
         }
     }
-}
-
-@Composable
-private fun DropMenuItemCluster(
-    cluster: String,
-    currentCluster: String,
-    onSelect: () -> Unit
-) {
-    DropdownMenuItem(
-        text = {
-            Text(
-                text = cluster,
-                color = if (cluster == currentCluster) Color(0xFF38BDF8) else Color.White,
-                fontSize = 11.sp,
-                fontWeight = if (cluster == currentCluster) FontWeight.Bold else FontWeight.Normal,
-                maxLines = 1,
-                softWrap = false
-            )
-        },
-        onClick = onSelect
-    )
 }
 
 @Composable

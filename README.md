@@ -16,7 +16,7 @@ Máy chủ game: `https://volamidle.pages.dev`
 |---|---|
 | Đa tab | 4 WebView song song, mỗi tab một profile cách ly (cookie/session riêng) |
 | Tự động đăng nhập | Điền tài khoản/mật khẩu vào form game, tự bấm xác định |
-| Chọn cụm | Dropdown Cụm 1/2/3 — cả ba trỏ về cùng một máy chủ |
+| Máy chủ game | Dùng `https://volamidle.pages.dev`; URL tùy chỉnh chỉ nhận HTTPS đúng máy chủ này |
 | Bố cục | 4 cột dọc / lưới 2x2 / 1 tab toàn màn hình |
 | Giữ kết nối | Foreground service + PARTIAL_WAKE_LOCK + WifiLock, tự phục hồi khi bị thu hồi RAM |
 | Khóa FPS | Giới hạn 30 hoặc 60 FPS |
@@ -60,14 +60,9 @@ APK ra ở `app/build/outputs/apk/debug/app-debug.apk`.
 | Nhánh | Nguồn gốc | Ghi chú |
 |---|---|---|
 | `main` | v1 → v2.0.0 | Bản do Thiên Cơ Labs refactor: gỡ VPN **và** chọn cụm, sửa lỗi mất tài khoản khi nâng cấp, thêm validate URL, thêm 9 test migration |
-| `v3` | v1 → v3 | Bản dev gửi: gỡ VPN, **giữ** chọn cụm, thêm tính năng tự động trong game |
+| `v3` | v1 → v3 | Bản dev gửi; bản phát hành hiện tại đã bỏ chọn cụm và giữ tính năng tự động trong game |
 
-v3 **không** bao gồm các bản sửa của nhánh `main`:
-
-- Không có `validateCustomUrl` — ô URL tùy chỉnh nhận mọi chuỗi
-- Không có giới hạn thử lại khi lỗi máy chủ — tải lại mỗi 2.5 giây vô hạn
-- Không có bản sửa migration — mật khẩu nhân bản 5–11 lần mỗi tab, có thể hồi sinh tài khoản đã xóa
-- Không có bộ test migration
+Bản phát hành này bổ sung validate URL, giới hạn thử lại và migration dữ liệu tài khoản khi bỏ chọn cụm.
 
 ## Cấu trúc mã nguồn
 
@@ -75,7 +70,7 @@ v3 **không** bao gồm các bản sửa của nhánh `main`:
 app/src/main/java/com/example/
 ├── MainActivity.kt              # Activity chính, dựng layout theo hướng màn hình
 ├── KeepAliveService.kt          # Foreground service + wakelock + wifi lock
-├── data/PreferencesManager.kt   # Lưu tài khoản theo cụm, cấu hình
+├── data/PreferencesManager.kt   # Lưu tài khoản và cấu hình theo tab
 ├── model/GameState.kt           # Data class và enum
 ├── network/TrafficMonitor.kt    # Đọc thống kê lưu lượng qua TrafficStats
 ├── ui/
@@ -86,21 +81,9 @@ app/src/main/java/com/example/
     └── GameScriptInjector.kt    # Sinh mã JS bơm vào trang game
 ```
 
-## Bảo mật — đã biết, CHƯA khắc phục
+## Bảo mật
 
-Bản này **chưa được hardened**. Các vấn đề dưới đây đã được audit và ghi nhận:
-
-| Mức | Vấn đề |
-|---|---|
-| Critical | `onReceivedSslError` gọi `proceed()` vô điều kiện — chấp nhận mọi chứng chỉ TLS |
-| Critical | Tự động điền mật khẩu vào **bất kỳ** trang nào load xong, không kiểm tra tên miền (8 điểm inject) |
-| High | `AndroidBridge` mở cho mọi frame, không bao giờ gỡ; `onGameKickedDetected` cho phép trang web tự ra lệnh bơm mật khẩu |
-| High | Mật khẩu lưu plaintext, nhân bản 5–11 lần mỗi tab; `allowBackup=true` → được backup lên cloud |
-| High | APK `debuggable=true` → `adb run-as` đọc được toàn bộ mật khẩu |
-| Medium | `usesCleartextTraffic=true` + `MIXED_CONTENT_ALWAYS_ALLOW` |
-| Medium | Ô URL tùy chỉnh không validate scheme/host |
-| Medium | `versionCode` vẫn là 1 — không cập nhật đè được bản cũ |
-| Low | `isMinifyEnabled=false`, ~13MB dependency không dùng (firebase-ai, okhttp, room, retrofit) |
+Các thay đổi hardening trong bản 3.0.1 và các rủi ro còn lại được ghi tại [SECURITY.md](SECURITY.md).
 
 **Chỉ dùng cho mục đích cá nhân.** Không phân phối cho người khác ở trạng thái hiện tại.
 

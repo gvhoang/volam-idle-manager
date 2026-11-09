@@ -10,14 +10,14 @@ import com.google.gms.googleservices.GoogleServicesPlugin.MissingGoogleServicesS
 
 android {
   namespace = "com.example"
-  compileSdk { version = release(36) { minorApiLevel = 1 } }
+  compileSdk = 36
 
   defaultConfig {
     applicationId = "com.aistudio.volamidle.qkrvtp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 1
-    versionName = "1.0"
+    versionCode = 2
+    versionName = "3.0.1"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

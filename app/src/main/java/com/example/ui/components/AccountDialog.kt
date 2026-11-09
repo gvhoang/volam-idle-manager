@@ -33,6 +33,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import com.example.data.PreferencesManager
 import com.example.model.AccountConfig
 
 @Composable
@@ -45,6 +46,7 @@ fun AccountDialog(
     var password by remember { mutableStateOf(accountConfig.password) }
     var autoLoginEnabled by remember { mutableStateOf(accountConfig.autoLoginEnabled) }
     var customUrl by remember { mutableStateOf(accountConfig.customUrl) }
+    var customUrlError by remember { mutableStateOf(false) }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -110,7 +112,10 @@ fun AccountDialog(
 
                 OutlinedTextField(
                     value = customUrl,
-                    onValueChange = { customUrl = it },
+                    onValueChange = {
+                        customUrl = it
+                        customUrlError = false
+                    },
                     label = { Text("URL Tùy chỉnh (để trống dùng mặc định)", fontSize = 11.sp) },
                     singleLine = true,
                     placeholder = { Text("https://volamidle.pages.dev", color = Color(0xFF64748B), fontSize = 11.sp) },
@@ -124,6 +129,13 @@ fun AccountDialog(
                     ),
                     modifier = Modifier.fillMaxWidth()
                 )
+                if (customUrlError) {
+                    Text(
+                        text = "Chỉ chấp nhận HTTPS trên volamidle.pages.dev",
+                        color = Color(0xFFF87171),
+                        fontSize = 10.sp
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(6.dp))
 
@@ -163,14 +175,19 @@ fun AccountDialog(
                     Spacer(modifier = Modifier.width(8.dp))
                     Button(
                         onClick = {
-                            onSave(
-                                accountConfig.copy(
-                                    username = username.trim(),
-                                    password = password.trim(),
-                                    autoLoginEnabled = autoLoginEnabled,
-                                    customUrl = customUrl.trim()
+                            val cleanUrl = customUrl.trim()
+                            if (cleanUrl.isNotEmpty() && !PreferencesManager.isTrustedGameUrl(cleanUrl)) {
+                                customUrlError = true
+                            } else {
+                                onSave(
+                                    accountConfig.copy(
+                                        username = username.trim(),
+                                        password = password.trim(),
+                                        autoLoginEnabled = autoLoginEnabled,
+                                        customUrl = cleanUrl
+                                    )
                                 )
-                            )
+                            }
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
                         modifier = Modifier.testTag("save_account_button")
