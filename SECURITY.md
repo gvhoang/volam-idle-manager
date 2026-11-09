@@ -17,4 +17,4 @@
 | Medium | `AndroidBridge` is still registered with `addJavascriptInterface`, which exposes the object to frames in the trusted page. | A compromised trusted origin or injected third-party frame may invoke bridge callbacks. The callback that can trigger auto-login now checks the top-level URL and tab index, but a stronger origin-bound message channel is still preferable. |
 | Low | APK signing credentials are not included in the repository. | A signed release APK requires the established release keystore and its credentials; the debug keystore is not suitable for public distribution or future upgrade continuity. |
 
-This is a source review and release build check, not a penetration test of the live game service or Android devices.
+The debug APK builds successfully. Release sources compile, but `assembleRelease` stops at packaging because the configured `my-upload-key.jks` is absent. A signed release APK requires the existing release keystore; this is not a penetration test of the live game service or Android devices.
