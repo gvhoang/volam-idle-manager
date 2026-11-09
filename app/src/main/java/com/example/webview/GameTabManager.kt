@@ -37,7 +37,15 @@ import org.json.JSONObject
  * triệt tiêu hoàn toàn hiện tượng giật hình, tua nhanh hoặc nhảy vị trí khi quay lại app.
  */
 class KeepAliveWebView(context: Context) : WebView(context) {
-    var keepAliveInBackground: Boolean = true
+    var keepAliveInBackground: Boolean = false
+    var lastTouchTimeMs: Long = 0L
+
+    override fun dispatchTouchEvent(ev: android.view.MotionEvent?): Boolean {
+        if (ev != null) {
+            lastTouchTimeMs = System.currentTimeMillis()
+        }
+        return super.dispatchTouchEvent(ev)
+    }
 
     override fun onWindowVisibilityChanged(visibility: Int) {
         if (keepAliveInBackground && visibility != View.VISIBLE) {
@@ -56,7 +64,11 @@ class KeepAliveWebView(context: Context) : WebView(context) {
     }
 
     override fun onWindowFocusChanged(hasWindowFocus: Boolean) {
-        super.onWindowFocusChanged(if (keepAliveInBackground) true else hasWindowFocus)
+        if (keepAliveInBackground) {
+            super.onWindowFocusChanged(true)
+        } else {
+            super.onWindowFocusChanged(hasWindowFocus)
+        }
     }
 }
 
@@ -66,6 +78,17 @@ class GameTabManager(
     private val coroutineScope: CoroutineScope
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val contextWrappers = Array(4) { android.content.MutableContextWrapper(context) }
+    private val isDesktopMode = BooleanArray(4) { false }
+
+    fun updateActivityContext(activityContext: Context) {
+        for (wrapper in contextWrappers) {
+            if (wrapper.baseContext !== activityContext) {
+                wrapper.baseContext = activityContext
+            }
+        }
+    }
 
     // QUY CHUẨN 3: Giai đoạn 1 - Khởi đầu ở trạng thái chờ (isSystemRunning = false)
     private val _isSystemRunning = MutableStateFlow(false)
@@ -115,7 +138,7 @@ class GameTabManager(
         // Tuyệt đối KHÔNG được gọi webView.settings, CookieManager, hay bất kỳ hàm nào
         // của webView trước dòng này để tránh bị khóa vào Default Profile!
         // =========================================================================
-        val webView = KeepAliveWebView(context)
+        val webView = KeepAliveWebView(contextWrappers[tabIndex])
         val clusterId = getClusterId()
         if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             try {
@@ -123,12 +146,14 @@ class GameTabManager(
             } catch (_: Exception) {}
         }
 
-        // Sau khi đã cô lập profile 100%, mới thiết lập các cấu hình phần cứng và WebSettings
-        webView.keepAliveInBackground = true
+        // Sau khi đã cô cô lập profile 100%, mới thiết lập các cấu hình phần cứng và WebSettings
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
         }
+
+        webView.isFocusable = true
+        webView.isFocusableInTouchMode = true
 
         webView.settings.apply {
             javaScriptEnabled = true
@@ -141,7 +166,12 @@ class GameTabManager(
             allowFileAccess = false
             allowContentAccess = false
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
-            userAgentString = "Mozilla/5.0 (Linux; Android 14; Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 VoLamIdle/1.0"
+            userAgentString = if (isDesktopMode[tabIndex]) {
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+            } else {
+                "Mozilla/5.0 (Linux; Android 14; Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 VoLamIdle/1.0"
+            }
+            javaScriptCanOpenWindowsAutomatically = true
         }
 
         webView.addJavascriptInterface(AndroidGameBridge(tabIndex), "AndroidBridge")
@@ -420,6 +450,25 @@ class GameTabManager(
         }
     }
 
+    // Chuyển đổi giữa chế độ Web PC và Mobile
+    fun toggleDesktopMode(tabIndex: Int): Boolean {
+        isDesktopMode[tabIndex] = !isDesktopMode[tabIndex]
+        val isPC = isDesktopMode[tabIndex]
+        mainHandler.post {
+            val wv = webViews[tabIndex]
+            if (wv != null) {
+                wv.settings.userAgentString = if (isPC) {
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+                } else {
+                    "Mozilla/5.0 (Linux; Android 14; Tablet) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 VoLamIdle/1.0"
+                }
+                wv.reload()
+                updateStatus(tabIndex, if (isPC) "Đã chuyển sang giao diện PC..." else "Đã chuyển sang giao diện Mobile...")
+            }
+        }
+        return isPC
+    }
+
     // Khi người dùng chuyển sang ứng dụng khác (chạy ngầm):
     // Giữ nguyên bộ đếm thời gian, ưu tiên tiến trình Renderer và bật cờ __isAppInBackground
     // để vòng lặp game chạy bằng bộ nhịp ngầm 20 FPS, tránh tích tụ gói tin gây nhảy vị trí.
@@ -452,7 +501,7 @@ class GameTabManager(
             val gcScript = GameScriptInjector.buildDomGarbageCollectionScript()
             for (i in 0..3) {
                 val wv = webViews[i] ?: continue
-                wv.keepAliveInBackground = true
+                wv.keepAliveInBackground = false // TẮT lừa dối hệ điều hành để Select/Dropdown hoạt động bình thường
                 if (isTabActive[i]) {
                     try {
                         wv.onResume()
@@ -580,10 +629,14 @@ class GameTabManager(
                 delay(2500)
                 if (_isSystemRunning.value) {
                     for (i in 0..3) {
+                        val wv = webViews[i]
+                        // Tạm dừng quét 5 giây nếu người dùng vừa chạm tay vào WebView này
+                        if (wv != null && System.currentTimeMillis() - wv.lastTouchTimeMs < 5000L) {
+                            continue
+                        }
                         if (isTabActive[i]) {
                             val currentStats = _characterStatsList.value.getOrNull(i)
                             if (currentStats?.state == TabLifecycleState.IN_GAME) {
-                                val wv = webViews[i]
                                 if (wv != null && wv.url != null && wv.url != "about:blank") {
                                     val script = GameScriptInjector.buildPeriodicWatchdogAndScanScript(i)
                                     wv.evaluateJavascript(script, null)

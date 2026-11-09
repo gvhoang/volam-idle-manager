@@ -51,6 +51,8 @@ class TabCardViewHolder(
     val titleText: TextView,
     val statusDot: View,
     val btnOpen: Button,
+    val btnPc: Button,
+    val btnReload: Button,
     val btnStop: Button,
     val idleOverlay: LinearLayout,
     val idleOpenBtn: Button,
@@ -67,6 +69,10 @@ fun GameWebViewContainer(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    
+    // THUỐC ĐẶC TRỊ SỐ 2: Cấp Window Token thực tế (Activity) cho WebView 
+    // để Android OS cho phép tạo cửa sổ Popup <select> thay vì bị crash/đóng lập tức.
+    tabManager.updateActivityContext(context)
 
     // Giữ nguyên thực thể (Instance) của 4 TabContainerView
     val tabCardHolders = remember {
@@ -385,7 +391,7 @@ private fun createTabCardViewHolder(
 
     val btnOpen = Button(context).apply {
         layoutParams = LinearLayout.LayoutParams(
-            (46 * density).toInt(),
+            (42 * density).toInt(),
             (22 * density).toInt()
         ).apply {
             rightMargin = (4 * density).toInt()
@@ -402,6 +408,48 @@ private fun createTabCardViewHolder(
         }
     }
     headerLayout.addView(btnOpen)
+
+    val btnPc = Button(context).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            (32 * density).toInt(),
+            (22 * density).toInt()
+        ).apply {
+            rightMargin = (4 * density).toInt()
+        }
+        text = "PC"
+        textSize = 9.5f
+        typeface = Typeface.DEFAULT_BOLD
+        isSingleLine = true
+        setTextColor(AndroidColor.WHITE)
+        setBackgroundColor(AndroidColor.parseColor("#4B5563")) // Mặc định Mobile (Xám)
+        setPadding(0, 0, 0, 0)
+        setOnClickListener {
+            val isPC = tabManager.toggleDesktopMode(tabIndex)
+            setBackgroundColor(if (isPC) AndroidColor.parseColor("#9333EA") else AndroidColor.parseColor("#4B5563"))
+        }
+    }
+    headerLayout.addView(btnPc)
+
+    val btnReload = Button(context).apply {
+        layoutParams = LinearLayout.LayoutParams(
+            (32 * density).toInt(),
+            (22 * density).toInt()
+        ).apply {
+            rightMargin = (4 * density).toInt()
+        }
+        text = "↻"
+        textSize = 10.5f
+        typeface = Typeface.DEFAULT_BOLD
+        isSingleLine = true
+        setTextColor(AndroidColor.WHITE)
+        setBackgroundColor(AndroidColor.parseColor("#3B82F6"))
+        setPadding(0, 0, 0, 0)
+        setOnClickListener {
+            val wv = tabManager.getOrCreateWebView(tabIndex)
+            wv.reload()
+        }
+    }
+    headerLayout.addView(btnReload)
 
     val btnStop = Button(context).apply {
         layoutParams = LinearLayout.LayoutParams(
@@ -433,6 +481,32 @@ private fun createTabCardViewHolder(
         setBackgroundColor(AndroidColor.parseColor("#090D14"))
     }
 
+    // THUỐC ĐẶC TRỊ CHỐNG ĐÓNG POPUP <SELECT>: 
+    // Wrapper chặn triệt để các luồng đo đạc (measure) rác từ Jetpack Compose.
+    // Nguyên nhân sâu xa: Mỗi khi Compose vẽ lại màn hình (ví dụ khi cập nhật ping mạng hoặc stats),
+    // nó gọi measure() trên toàn bộ cây View. Khi WebView nhận lệnh measure() (dù kích thước không đổi),
+    // bộ máy Chromium mặc định sẽ "cẩn tắc vô áy náy" đóng sập ngay lập tức mọi menu Dropdown/Select đang mở.
+    val webViewWrapper = object : FrameLayout(context) {
+        private var lastWidthSpec = -1
+        private var lastHeightSpec = -1
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            if (widthMeasureSpec == lastWidthSpec && heightMeasureSpec == lastHeightSpec) {
+                // Kích thước không đổi -> chặn đứng không cho truyền xuống WebView
+                setMeasuredDimension(measuredWidth, measuredHeight)
+                return
+            }
+            lastWidthSpec = widthMeasureSpec
+            lastHeightSpec = heightMeasureSpec
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }.apply {
+        layoutParams = FrameLayout.LayoutParams(
+            ViewGroup.LayoutParams.MATCH_PARENT,
+            ViewGroup.LayoutParams.MATCH_PARENT
+        )
+    }
+
     // Gắn WebView độc lập của Tab
     val webView = tabManager.getOrCreateWebView(tabIndex)
     (webView.parent as? ViewGroup)?.removeView(webView)
@@ -440,7 +514,8 @@ private fun createTabCardViewHolder(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.MATCH_PARENT
     )
-    contentContainer.addView(webView)
+    webViewWrapper.addView(webView)
+    contentContainer.addView(webViewWrapper)
 
     // GIAI ĐOẠN 1: Màn hình chờ (Idle Overlay) có nút [▶ Mở Tab X]
     val idleOverlay = LinearLayout(context).apply {
@@ -496,6 +571,8 @@ private fun createTabCardViewHolder(
         titleText = titleText,
         statusDot = statusDot,
         btnOpen = btnOpen,
+        btnPc = btnPc,
+        btnReload = btnReload,
         btnStop = btnStop,
         idleOverlay = idleOverlay,
         idleOpenBtn = idleOpenBtn,

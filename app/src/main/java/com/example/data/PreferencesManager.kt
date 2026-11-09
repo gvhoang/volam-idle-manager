@@ -12,10 +12,6 @@ class PreferencesManager(context: Context) {
     companion object {
         private const val KEY_CLUSTER = "pref_cluster"
         private const val KEY_FPS = "pref_fps"
-        private const val KEY_AUTO_PROTON = "pref_auto_proton"
-        private const val KEY_AUTO_PROXY = "pref_auto_proxy"
-        private const val KEY_PROXY_HOST = "pref_proxy_host"
-        private const val KEY_PROXY_PORT = "pref_proxy_port"
         private const val KEY_RX_OFFSET = "pref_rx_offset"
         private const val KEY_TX_OFFSET = "pref_tx_offset"
         private const val KEY_LEGACY_USER_PREFIX = "pref_user_tab_"
@@ -50,37 +46,6 @@ class PreferencesManager(context: Context) {
 
     fun setFps(fps: Int) {
         prefs.edit().putInt(KEY_FPS, fps).apply()
-    }
-
-    fun isAutoProtonVpn(): Boolean {
-        return prefs.getBoolean(KEY_AUTO_PROTON, false)
-    }
-
-    fun setAutoProtonVpn(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_AUTO_PROTON, enabled).apply()
-    }
-
-    fun isAutoProxyEnabled(): Boolean {
-        return prefs.getBoolean(KEY_AUTO_PROXY, false)
-    }
-
-    fun setAutoProxyEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_AUTO_PROXY, enabled).apply()
-    }
-
-    fun getProxyHost(): String {
-        return prefs.getString(KEY_PROXY_HOST, "127.0.0.1") ?: "127.0.0.1"
-    }
-
-    fun getProxyPort(): Int {
-        return prefs.getInt(KEY_PROXY_PORT, 1080)
-    }
-
-    fun setProxyConfig(host: String, port: Int) {
-        prefs.edit()
-            .putString(KEY_PROXY_HOST, host)
-            .putInt(KEY_PROXY_PORT, port)
-            .commit()
     }
 
     fun getAccount(tabIndex: Int, cluster: String = getCluster()): AccountConfig {

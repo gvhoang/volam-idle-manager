@@ -23,19 +23,14 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Security
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.DividerDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -44,7 +39,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -54,15 +48,12 @@ import com.example.model.TabLifecycleState
 
 @Composable
 fun SidebarView(
-    isVpnActive: Boolean,
     isMasterAutoRunning: Boolean,
     characterStatsList: List<CharacterStats>,
     selectedTabIndex: Int,
     onSelectTab: (Int) -> Unit,
     onLoginAll: () -> Unit,
     onStopAll: () -> Unit,
-    onLaunchProtonVpn: () -> Unit,
-    onOpenProxyConfig: () -> Unit,
     onEditAccount: (Int) -> Unit,
     onSyncAutoMode: (String) -> Unit,
     onToggleSidebar: () -> Unit,
@@ -112,94 +103,7 @@ fun SidebarView(
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // MODULE 1: VPN STATUS BAR
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("vpn_status_card"),
-                shape = RoundedCornerShape(6.dp),
-                color = if (isVpnActive) Color(0xFF064E3B) else Color(0xFF451A03),
-                border = BorderStroke(1.dp, if (isVpnActive) Color(0xFF059669) else Color(0xFFD97706))
-            ) {
-                Column(modifier = Modifier.padding(6.dp)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.Default.Security,
-                                contentDescription = "VPN",
-                                tint = if (isVpnActive) Color(0xFF34D399) else Color(0xFFFBBF24),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = if (isVpnActive) "🛡️ VPN: ĐANG BẬT" else "⚠️ VPN: CHƯA BẬT",
-                                color = if (isVpnActive) Color(0xFF6EE7B7) else Color(0xFFFDE68A),
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Text(
-                            text = if (isVpnActive) "(Bảo vệ IP)" else "(IP Gốc)",
-                            color = if (isVpnActive) Color(0xFFA7F3D0) else Color(0xFFFCD34D),
-                            fontSize = 9.sp
-                        )
-                    }
-
-                    if (!isVpnActive) {
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Button(
-                                onClick = onLaunchProtonVpn,
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .height(26.dp)
-                                    .testTag("launch_proton_button"),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = Color(0xFF6D28D9)
-                                ),
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
-                                shape = RoundedCornerShape(4.dp)
-                            ) {
-                                Text(
-                                    text = "🛡️ Bật ProtonVPN",
-                                    fontSize = 9.5.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1
-                                )
-                            }
-                            OutlinedButton(
-                                onClick = onOpenProxyConfig,
-                                modifier = Modifier
-                                    .height(26.dp)
-                                    .testTag("proxy_config_button"),
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp),
-                                shape = RoundedCornerShape(4.dp),
-                                border = BorderStroke(1.dp, Color(0xFF475569))
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Settings,
-                                    contentDescription = "Proxy",
-                                    tint = Color(0xFFCBD5E1),
-                                    modifier = Modifier.size(12.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(6.dp))
 
             // MODULE 2: MASTER CONTROLS [▶ ĐĂNG NHẬP TẤT CẢ] & [⏹ DỪNG TẤT CẢ]
             Row(
@@ -509,18 +413,6 @@ fun CharacterCard(
                         TabLifecycleState.IN_GAME -> Color(0xFF10B981)
                         TabLifecycleState.LOGGING_IN -> Color(0xFFF59E0B)
                         TabLifecycleState.IDLE -> Color(0xFF64748B)
-                        TabLifecycleState.OFFLINE -> Color(0xFFEF4444)
-                    }
-                    val statusText = when (stats.state) {
-                        TabLifecycleState.IN_GAME -> "🟢 Online"
-                        TabLifecycleState.LOGGING_IN -> "🟡 Đang vào"
-                        TabLifecycleState.IDLE -> "⚪ Chờ mở"
-                        TabLifecycleState.OFFLINE -> "🔴 Đã dừng"
-                    }
-                    val statusColor = when (stats.state) {
-                        TabLifecycleState.IN_GAME -> Color(0xFF34D399)
-                        TabLifecycleState.LOGGING_IN -> Color(0xFFFBBF24)
-                        TabLifecycleState.IDLE -> Color(0xFF94A3B8)
                         TabLifecycleState.OFFLINE -> Color(0xFFEF4444)
                     }
 

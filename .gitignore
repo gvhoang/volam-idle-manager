@@ -1,29 +1,52 @@
-# Built artifacts — never commit
+# ============================================================
+# Signing material — NEVER commit
+# Dev cung cấp keystore đầy đủ theo yêu cầu, nhưng không đưa lên git.
+# ============================================================
+debug.keystore
+*.keystore
+*.jks
+*.p12
+*.pfx
+my-upload-key.jks
+keystore.properties
+
+# ============================================================
+# Local config — NEVER commit
+# ============================================================
+local.properties
+.env
+.env.local
+
+# ============================================================
+# Build output
+# ============================================================
+.gradle
+.kotlin
+build/
+/app/build
+/captures
+.externalNativeBuild
+.cxx
 *.apk
 *.aab
 *.ap_
 *.dex
 
-# Gradle / build output
-.gradle/
-.kotlin/
-build/
-/captures
-.externalNativeBuild
-.cxx
-
-# Local config and signing material — never commit
-local.properties
-.env
-debug.keystore
-*.jks
-*.keystore
-
+# ============================================================
 # IDE
+# ============================================================
 *.iml
 .idea/
 .DS_Store
 
-# AI Studio preview artifacts (not part of the Android build)
+# ============================================================
+# AI Studio preview artifacts (không thuộc bản dựng Android)
+# ============================================================
 .aistudio/
 public/
+
+# ============================================================
+# Tài liệu/audit nội bộ
+# ============================================================
+_audit/
+*.log

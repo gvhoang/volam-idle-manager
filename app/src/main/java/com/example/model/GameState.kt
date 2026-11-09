@@ -46,4 +46,3 @@ enum class ViewLayoutMode {
     TWO_BY_TWO,
     SINGLE_TAB
 }
-

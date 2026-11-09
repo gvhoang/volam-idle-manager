@@ -586,6 +586,49 @@ object GameScriptInjector {
                 }
 
                 // =========================================================================
+                // BƯỚC 1.5: KIỂM TRA MÀN HÌNH CHỌN NHÂN VẬT MỚI
+                // (Màn hình này có nút "Tạo Nhân Vật", "Hủy", "Xác Định", hoặc "Vào Game")
+                // =========================================================================
+                const charSelectConfirmBtn = findBestButtonByText(function(txtNA, rawTxt, el) {
+                    if (txtNA === 'xac dinh' || txtNA === 'vao game' || txtNA === 'bat dau') {
+                        // Phải đảm bảo nó không nằm trong popup đăng nhập
+                        const isLoginModal = el.closest('form') || (el.parentElement && el.parentElement.querySelector && el.parentElement.querySelector('input[type="password"]'));
+                        if (!isLoginModal) return 130;
+                    }
+                    return -1;
+                });
+                
+                if (charSelectConfirmBtn && getVisibleEditableInputs().length === 0) {
+                     // Click thẻ nhân vật trước nếu có
+                     const sects = ['Thiếu Lâm', 'Thiên Vương', 'Đường Môn', 'Ngũ Độc', 'Nga Mi', 'Thúy Yên', 'Cái Bang', 'Thiên Nhẫn', 'Võ Đang', 'Côn Lôn', 'Đoàn Thị'];
+                     let charCard = null;
+                     for (const el of allClickables) {
+                         if (!isVisible(el)) continue;
+                         const txt = (el.innerText || '');
+                         if (txt.includes('Cấp') || txt.includes('Lv') || sects.some(s => txt.includes(s))) {
+                             const rect = el.getBoundingClientRect();
+                             if (rect.height > 20 && rect.width > 50) {
+                                 charCard = el;
+                                 break;
+                             }
+                         }
+                     }
+                     
+                     if (charCard) {
+                         realClick(charCard);
+                     }
+                     
+                     setTimeout(function() {
+                         realClick(charSelectConfirmBtn);
+                         if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                             window.AndroidBridge.onGameLog(tabIdx, "Đã chọn nhân vật và ấn [" + (charSelectConfirmBtn.innerText || "Xác Định") + "] vào game");
+                         }
+                     }, 150);
+                     
+                     return "CLICKED_CHARACTER_SELECT";
+                }
+
+                // =========================================================================
                 // BƯỚC 2: NẾU ĐANG Ở MÀN HÌNH CHỜ BAN ĐẦU -> ẤN NÚT "BẮT ĐẦU TRÒ CHƠI"
                 // (Trước khi vào khu vực đăng nhập phải ấn "Bắt Đầu Trò Chơi")
                 // =========================================================================
@@ -635,7 +678,7 @@ object GameScriptInjector {
                 // và KHÔNG còn khung "Đăng Nhập" che bên trên!
                 // =========================================================================
                 const authLandingCheck = findBestButtonByText(function(txtNA) {
-                    if (txtNA === 'bat dau tro choi' || txtNA === 'dang ky tai khoan' || txtNA === 'quen mat ma' || txtNA === 'xac dinh') {
+                    if (txtNA === 'bat dau tro choi' || txtNA === 'dang ky tai khoan' || txtNA === 'quen mat ma' || txtNA === 'xac dinh' || txtNA === 'tao nhan vat') {
                         return 100;
                     }
                     return -1;
@@ -647,7 +690,8 @@ object GameScriptInjector {
                                          bodyNA.includes('chua co tai khoan') ||
                                          bodyNA.includes('moi tai khoan 1 nhan vat') ||
                                          bodyNA.includes('nho tai khoan') ||
-                                         bodyNA.includes('hien mat ma');
+                                         bodyNA.includes('hien mat ma') ||
+                                         bodyNA.includes('tao nhan vat');
                 const isAuthOverlayStillVisible = (authLandingCheck !== null) || (getVisibleEditableInputs().length >= 1) || hasAuthModalText;
 
                 if (!isAuthOverlayStillVisible) {
@@ -682,6 +726,20 @@ object GameScriptInjector {
         (function() {
             try {
                 const tabIdx = $tabIndex;
+                
+                // User Touch Lock: Dừng quét ngầm nếu đang thao tác ô chọn (SELECT, INPUT, TEXTAREA)
+                const activeEl = document.activeElement;
+                if (activeEl) {
+                    const tag = (activeEl.tagName || '').toUpperCase();
+                    if (tag === 'SELECT' || tag === 'INPUT' || tag === 'TEXTAREA') {
+                        return "USER_IS_INTERACTING";
+                    }
+                }
+                
+                // User Touch Lock: Nếu hệ thống chặn qua Kotlin (biến cờ từ Java)
+                if (window.__isUserTouching) {
+                    return "USER_IS_TOUCHING_FROM_KOTLIN";
+                }
 
                 function norm(str) {
                     return (str || '').toString().toLowerCase().normalize('NFC').replace(/\s+/g, ' ').trim();
@@ -788,20 +846,21 @@ object GameScriptInjector {
                     }
                 }
 
-                // 2. PHÁT HIỆN ĐANG Ở MÀN HÌNH "BẮT ĐẦU TRÒ CHƠI" HOẶC KHUNG "ĐĂNG NHẬP" (Bản 1031)
+                // 2. PHÁT HIỆN ĐANG Ở MÀN HÌNH "BẮT ĐẦU TRÒ CHƠI" HOẶC KHUNG "ĐĂNG NHẬP" HOẶC "CHỌN NHÂN VẬT" (Bản 1031)
                 let isStartOrLoginVisible = bodyNA.includes('bat dau tro choi') ||
                                             bodyNA.includes('dang ky tai khoan') ||
                                             bodyNA.includes('chua co tai khoan') ||
                                             bodyNA.includes('moi tai khoan 1 nhan vat') ||
                                             bodyNA.includes('nho tai khoan') ||
-                                            bodyNA.includes('hien mat ma');
+                                            bodyNA.includes('hien mat ma') ||
+                                            bodyNA.includes('tao nhan vat');
 
                 if (!isStartOrLoginVisible) {
                     for (const el of allElements) {
                         const rawTxt = (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
                         if (!rawTxt || rawTxt.length > 35) continue;
                         const tNA = noAccent(rawTxt);
-                        if (tNA === 'bat dau tro choi' || tNA === 'dang ky tai khoan' || tNA === 'xac dinh') {
+                        if (tNA === 'bat dau tro choi' || tNA === 'dang ky tai khoan' || tNA === 'xac dinh' || tNA === 'tao nhan vat') {
                             if (isVisible(el)) {
                                 isStartOrLoginVisible = true;
                                 break;
