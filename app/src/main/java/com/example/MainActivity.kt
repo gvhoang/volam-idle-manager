@@ -99,7 +99,6 @@ fun MainScreen(
     val isSleepMode by viewModel.isSleepMode.collectAsState()
     val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
     val layoutMode by viewModel.layoutMode.collectAsState()
-    val cluster by viewModel.cluster.collectAsState()
     val editingAccount by viewModel.editingAccount.collectAsState()
     val isBlackScreenSynced by viewModel.isBlackScreenSynced.collectAsState()
     val autoConfig by viewModel.autoConfig.collectAsState()
@@ -135,8 +134,6 @@ fun MainScreen(
                 HeaderBar(
                     isSidebarVisible = isSidebarVisible,
                     onToggleSidebar = { viewModel.toggleSidebar() },
-                    currentCluster = cluster,
-                    onChangeCluster = { viewModel.changeCluster(it) },
                     networkData = networkData,
                     onResetNetworkStats = { viewModel.resetNetworkCounters() },
                     fps = fps,

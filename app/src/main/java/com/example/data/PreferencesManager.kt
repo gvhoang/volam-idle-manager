@@ -23,6 +23,32 @@ class PreferencesManager(context: Context) {
         // thêm/bớt một mục sau này không phải sửa bản ghi cũ, và mặc định thiếu khoá đã
         // nằm trong AutoConfig.fromJson().
         private const val KEY_AUTO_CFG = "pref_auto_cfg"
+
+        /** Host của máy chủ game duy nhất được tin cậy. */
+        private const val GAME_HOST = "volamidle.pages.dev"
+
+        /**
+         * URL tùy chỉnh chỉ hợp lệ khi trỏ đúng máy chủ game và dùng HTTPS.
+         *
+         * Vì sao phải chặt: app tự điền tài khoản/mật khẩu vào trang ngay sau khi URL
+         * tải xong. Cho phép host lạ nghĩa là một URL gõ nhầm — hoặc bị người khác đưa
+         * cho — sẽ nhận được mật khẩu game. Chỉ nhận HTTPS vì trang đăng nhập không được
+         * đi qua kênh rõ.
+         *
+         * Chuỗi rỗng luôn hợp lệ: đó là "dùng máy chủ mặc định".
+         */
+        fun isTrustedGameUrl(url: String): Boolean {
+            val trimmed = url.trim()
+            if (trimmed.isEmpty()) return true
+            val uri = try {
+                android.net.Uri.parse(trimmed)
+            } catch (_: Exception) {
+                return false
+            }
+            if (uri.scheme?.lowercase() != "https") return false
+            val host = uri.host?.lowercase() ?: return false
+            return host == GAME_HOST || host.endsWith(".$GAME_HOST")
+        }
     }
 
     /** Chuỗi JSON cấu hình tự động. Rỗng = chưa từng lưu (mọi mặc định, trong đó on = false). */
