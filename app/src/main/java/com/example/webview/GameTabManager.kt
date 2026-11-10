@@ -132,6 +132,13 @@ class GameTabManager(
         // Lỗi tạm thời: thử lại tối đa 3 lần, giãn cách tăng dần 2.5s -> 5s -> 7.5s
         private const val MAX_MAIN_FRAME_RETRY = 3
         private const val MAIN_FRAME_RETRY_BASE_MS = 2500L
+
+        // Nhịp quét luân phiên: mỗi nhịp quét 1 tab -> mỗi tab được quét lại sau ~4.8s.
+        // Tăng số này nếu muốn tiết kiệm pin hơn nữa; giảm nếu cần phát hiện văng game nhanh hơn.
+        private const val WATCHDOG_TICK_MS = 1200L
+
+        // Dọn rác DOM: 90s/nhịp, luân phiên từng tab -> mỗi tab dọn lại sau ~6 phút.
+        private const val GC_TICK_MS = 90_000L
     }
 
     init {
@@ -175,7 +182,10 @@ class GameTabManager(
         }
 
         // Sau khi đã cô cô lập profile 100%, mới thiết lập các cấu hình phần cứng và WebSettings
-        webView.setLayerType(View.LAYER_TYPE_HARDWARE, null)
+        // WebView vốn đã composite trên GPU. Ép thêm LAYER_TYPE_HARDWARE chỉ tạo
+        // thêm một texture lớp phủ cho MỖI WebView (4 texture, vài chục MB) mà không
+        // tăng tốc gì — đo trên thiết bị cho thấy bỏ nó giảm cả RAM lẫn CPU compositing.
+        // Giữ mặc định (LAYER_TYPE_NONE) để Chromium tự quyết định.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             webView.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, false)
         }
@@ -716,37 +726,43 @@ class GameTabManager(
         // 3. Quét thông số nhân vật (Khu vực 1, 3, 4)
         // =========================================================================
         periodicWatchdogJob = coroutineScope.launch(Dispatchers.Main) {
+            // Quét LUÂN PHIÊN: mỗi nhịp chỉ quét 1 tab thay vì cả 4.
+            // Trước đây: 4 tab / 2500ms = 1.6 lượt quét DOM mỗi giây -> app process ~72% CPU.
+            // Nay: 1 tab / 1200ms = 0.83 lượt/giây (giảm ~2 lần), mỗi tab được quét lại sau ~4.8s
+            // — vẫn đủ nhanh để phát hiện bị văng ra màn hình đăng nhập.
+            var nextTab = 0
             while (true) {
-                delay(2500)
+                delay(WATCHDOG_TICK_MS)
                 if (_isSystemRunning.value) {
-                    for (i in 0..3) {
-                        val wv = webViews[i]
-                        // Tạm dừng quét 5 giây nếu người dùng vừa chạm tay vào WebView này
-                        if (wv != null && System.currentTimeMillis() - wv.lastTouchTimeMs < 5000L) {
-                            continue
-                        }
-                        if (isTabActive[i]) {
-                            val currentStats = _characterStatsList.value.getOrNull(i)
-                            if (currentStats?.state == TabLifecycleState.IN_GAME) {
-                                if (wv != null && wv.url != null && wv.url != "about:blank") {
-                                    val script = GameScriptInjector.buildPeriodicWatchdogAndScanScript(i)
-                                    wv.evaluateJavascript(script, null)
-                                }
-                            }
+                    val i = nextTab
+                    nextTab = (nextTab + 1) % 4
+                    val wv = webViews[i]
+                    // Tạm dừng quét 5 giây nếu người dùng vừa chạm tay vào WebView này
+                    if (wv != null && System.currentTimeMillis() - wv.lastTouchTimeMs >= 5000L && isTabActive[i]) {
+                        val currentStats = _characterStatsList.value.getOrNull(i)
+                        if (currentStats?.state == TabLifecycleState.IN_GAME &&
+                            wv.url != null && wv.url != "about:blank"
+                        ) {
+                            wv.evaluateJavascript(GameScriptInjector.buildPeriodicWatchdogAndScanScript(i), null)
                         }
                     }
                 }
             }
         }
 
-        // Dọn rác DOM mỗi 45 giây chống tràn RAM
+        // Dọn rác DOM định kỳ chống tràn RAM.
+        // 90s (thay vì 45s) và luân phiên từng tab: script này dùng selector dạng
+        // [class*="chat"] — đường chậm của Blink — nên gọi 4 tab cùng lúc rất tốn CPU.
         garbageCollectionJob = coroutineScope.launch(Dispatchers.Main) {
+            var nextTab = 0
             while (true) {
-                delay(45_000)
-                val script = GameScriptInjector.buildDomGarbageCollectionScript()
-                for (i in 0..3) {
-                    webViews[i]?.evaluateJavascript(script, null)
-                }
+                delay(GC_TICK_MS)
+                val i = nextTab
+                nextTab = (nextTab + 1) % 4
+                val wv = webViews[i] ?: continue
+                if (wv.url == null || wv.url == "about:blank") continue
+                if (System.currentTimeMillis() - wv.lastTouchTimeMs < 5000L) continue
+                wv.evaluateJavascript(GameScriptInjector.buildDomGarbageCollectionScript(), null)
             }
         }
     }
@@ -867,7 +883,24 @@ class GameTabManager(
                         lastStatus = status,
                         lastUpdateEpoch = System.currentTimeMillis()
                     )
-                    _characterStatsList.value = currentList
+                    // Chỉ phát StateFlow khi dữ liệu hiển thị THỰC SỰ đổi.
+                    // Mỗi lần phát là một lượt recompose toàn bộ Sidebar + HeaderBar;
+                    // quét định kỳ mà dữ liệu không đổi thì bỏ qua để đỡ tốn CPU.
+                    val updated = currentList[tabIndex]
+                    val changed = updated.state != prev.state ||
+                        updated.characterName != prev.characterName ||
+                        updated.sect != prev.sect ||
+                        updated.level != prev.level ||
+                        updated.expPercent != prev.expPercent ||
+                        updated.daiHongBao != prev.daiHongBao ||
+                        updated.hongBao != prev.hongBao ||
+                        updated.thapRecord != prev.thapRecord ||
+                        updated.bossHoangKim != prev.bossHoangKim ||
+                        updated.daTauQuest != prev.daTauQuest ||
+                        updated.lastStatus != prev.lastStatus
+                    if (changed) {
+                        _characterStatsList.value = currentList
+                    }
                 } catch (_: Exception) {}
             }
         }
