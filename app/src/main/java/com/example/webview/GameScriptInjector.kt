@@ -303,6 +303,19 @@ object GameScriptInjector {
                            meta.includes('username') || meta.includes('account') || meta.includes('user');
                 }
 
+                // Ô chat / ô soạn tin ở đáy màn hình chơi KHÔNG phải ô đăng nhập.
+                // Màn hình chơi luôn có sẵn ô "Nhập tin nhắn..." nên nếu tính nó là ô auth thì
+                // getVisibleEditableInputs().length luôn >= 1 và tab không bao giờ được báo IN_GAME.
+                const CHAT_COMPOSER_KEYWORDS = ['nhan tin', 'tin nhan', 'chat', 'nhap tin', 'noi dung', 'message', 'comment'];
+
+                function isChatOrComposer(inp) {
+                    const meta = getOwnInputMeta(inp);
+                    for (const kw of CHAT_COMPOSER_KEYWORDS) {
+                        if (meta.includes(kw)) return true;
+                    }
+                    return false;
+                }
+
                 const allClickables = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a, div, span, p, label'));
 
                 function getVisibleEditableInputs() {
@@ -313,6 +326,7 @@ object GameScriptInjector {
                         }
                         if (!isVisible(inp)) return false;
                         if (isServerField(inp)) return false;
+                        if (isChatOrComposer(inp)) return false;
                         return true;
                     });
                 }
@@ -331,7 +345,8 @@ object GameScriptInjector {
 
                         let matchScore = matcherFn(contentNA, rawContent, el);
                         if (matchScore <= 0) {
-                            const rawInner = (el.innerText || el.value || '').replace(/\s+/g, ' ').trim();
+                            // Dùng textContent (không phải innerText) để không kích hoạt reflow đồng bộ
+                            const rawInner = (el.textContent || el.value || '').replace(/\s+/g, ' ').trim();
                             if (rawInner && rawInner.length <= 45 && rawInner !== rawContent) {
                                 matchScore = matcherFn(noAccent(rawInner), rawInner, el);
                             }
@@ -674,39 +689,23 @@ object GameScriptInjector {
 
                 // =========================================================================
                 // BƯỚC 3: KIỂM TRA ĐÃ VÀO TRONG GAME THỰC SỰ HAY CHƯA
-                // Chỉ báo IN_GAME khi KHÔNG còn nút "Bắt Đầu Trò Chơi" / "Đăng Ký Tài Khoản"
-                // và KHÔNG còn khung "Đăng Nhập" che bên trên!
+                // Thứ tự ưu tiên: HUD chiến đấu quyết định TRƯỚC, khung Đăng Nhập chỉ là điều kiện phụ.
+                // Màn hình chơi luôn có ô chat ở đáy ("Nhập tin nhắn...") nên nếu để điều kiện
+                // "không còn ô nhập liệu" đứng trước thì tab kẹt vĩnh viễn ở LOGGING_IN.
                 // =========================================================================
-                const authLandingCheck = findBestButtonByText(function(txtNA) {
-                    if (txtNA === 'bat dau tro choi' || txtNA === 'dang ky tai khoan' || txtNA === 'quen mat ma' || txtNA === 'xac dinh' || txtNA === 'tao nhan vat') {
-                        return 100;
-                    }
-                    return -1;
-                });
                 const bodyText = document.body ? (document.body.innerText || '') : '';
-                const bodyNA = noAccent(bodyText);
-                const hasAuthModalText = bodyNA.includes('bat dau tro choi') ||
-                                         bodyNA.includes('dang ky tai khoan') ||
-                                         bodyNA.includes('chua co tai khoan') ||
-                                         bodyNA.includes('moi tai khoan 1 nhan vat') ||
-                                         bodyNA.includes('nho tai khoan') ||
-                                         bodyNA.includes('hien mat ma') ||
-                                         bodyNA.includes('tao nhan vat');
-                const isAuthOverlayStillVisible = (authLandingCheck !== null) || (getVisibleEditableInputs().length >= 1) || hasAuthModalText;
 
-                if (!isAuthOverlayStillVisible) {
-                    const hasBattleMenu = (bodyText.includes('Hành trang') && (bodyText.includes('Kỹ năng') || bodyText.includes('Võ công') || bodyText.includes('Hệ thống'))) ||
-                                         bodyText.includes('Chế độ :') || 
-                                         bodyText.includes('Chế độ:') ||
-                                         bodyText.includes('Chế Độ :') ||
-                                         bodyText.includes('Chế Độ:');
+                const hasBattleMenu = (bodyText.includes('Hành trang') && (bodyText.includes('Kỹ năng') || bodyText.includes('Võ công') || bodyText.includes('Hệ thống'))) ||
+                                     bodyText.includes('Chế độ :') || 
+                                     bodyText.includes('Chế độ:') ||
+                                     bodyText.includes('Chế Độ :') ||
+                                     bodyText.includes('Chế Độ:');
 
-                    if (hasBattleMenu) {
-                        if (window.AndroidBridge && window.AndroidBridge.onInGameDetected) {
-                            window.AndroidBridge.onInGameDetected(tabIdx);
-                        }
-                        return "IN_GAME";
+                if (hasBattleMenu) {
+                    if (window.AndroidBridge && window.AndroidBridge.onInGameDetected) {
+                        window.AndroidBridge.onInGameDetected(tabIdx);
                     }
+                    return "IN_GAME";
                 }
 
                 return "WAITING_SCREEN";
@@ -903,32 +902,39 @@ object GameScriptInjector {
                 let bossHoangKim = '0';
                 let daTauQuest = 'Chưa nhận';
 
-                const potentialNameEls = Array.from(document.querySelectorAll('.player-name, .character-name, .font-bold, .text-yellow-400, .text-amber-400, span, div'));
-                for (const el of potentialNameEls) {
-                    if (el.children && el.children.length > 2) continue;
-                    const txt = cleanText(el.textContent || el.innerText || '');
-                    if (txt.length < 2 || txt.length > 25) continue;
-                    const txtNA = noAccent(txt);
-                    if (!/^\d+$/.test(txt) &&
-                        !txtNA.includes('luc tay') &&
-                        !txtNA.includes('chien luc') &&
-                        !txtNA.includes('che do') &&
-                        !txtNA.includes('may chu') &&
-                        !txtNA.includes('vo lam') &&
-                        !txtNA.includes('tai khoan') &&
-                        !txtNA.includes('mat ma') &&
-                        !txtNA.includes('bat dau') &&
-                        !txtNA.includes('dang ky') &&
-                        !txt.includes('Cấp') && !txt.includes('HP') && !txt.includes('MP') && !txt.includes('EXP')) {
-                        const parentText = el.parentElement ? (el.parentElement.textContent || el.parentElement.innerText || '') : '';
+                // Quét tên nhân vật CÓ GIỚI HẠN: bản cũ duyệt toàn bộ span/div của cả trang mỗi 2500ms.
+                // Nay ưu tiên container chuyên dụng, chỉ dự phòng span/div khi chưa tìm thấy,
+                // cắt ở 400 phần tử đầu và dừng ngay khi có tên để không đốt CPU vô ích.
+                const NAME_SCAN_LIMIT = 400;
+                function isNameLikeText(txt, txtNA) {
+                    if (txt.length < 2 || txt.length > 25) return false;
+                    if (/^\d+$/.test(txt)) return false;
+                    if (txtNA.includes('luc tay') || txtNA.includes('chien luc') || txtNA.includes('che do') ||
+                        txtNA.includes('may chu') || txtNA.includes('vo lam') || txtNA.includes('tai khoan') ||
+                        txtNA.includes('mat ma') || txtNA.includes('bat dau') || txtNA.includes('dang ky')) return false;
+                    if (txt.includes('Cấp') || txt.includes('HP') || txt.includes('MP') || txt.includes('EXP')) return false;
+                    return true;
+                }
+                function scanCharNameIn(nodes) {
+                    for (const el of nodes) {
+                        if (el.children && el.children.length > 2) continue;
+                        const txt = cleanText(el.textContent || '');
+                        if (!txt) continue;
+                        const txtNA = noAccent(txt);
+                        if (!isNameLikeText(txt, txtNA)) continue;
+                        const parentText = el.parentElement ? (el.parentElement.textContent || '') : '';
                         const parentNA = noAccent(parentText);
                         if ((parentText.includes('Cấp') || parentText.includes('Lv') || parentText.includes('%')) && !parentNA.includes('luc tay 0')) {
-                            if (isVisible(el)) {
-                                charName = txt;
-                                break;
-                            }
+                            if (isVisible(el)) return txt;
                         }
                     }
+                    return '';
+                }
+                charName = scanCharNameIn(
+                    Array.from(document.querySelectorAll('.player-name, .character-name, .font-bold, .text-yellow-400, .text-amber-400')).slice(0, NAME_SCAN_LIMIT)
+                );
+                if (!charName) {
+                    charName = scanCharNameIn(Array.from(document.querySelectorAll('span, div')).slice(0, NAME_SCAN_LIMIT));
                 }
 
                 const sects = ['Thiếu Lâm', 'Thiên Vương', 'Đường Môn', 'Ngũ Độc', 'Nga Mi', 'Thúy Yên', 'Cái Bang', 'Thiên Nhẫn', 'Võ Đang', 'Côn Lôn', 'Đoàn Thị'];
@@ -1061,15 +1067,32 @@ object GameScriptInjector {
             let lastFrameTime = performance.now();
             let virtualTime = lastFrameTime;
             const originalRAF = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null;
+            const originalCAF = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : null;
+
+            // Sổ đăng ký khung hình đang chờ: handleId -> { timer, innerTimer, rafId, done }.
+            // requestAnimationFrame của shim trả về handleId (không phải id của setTimeout),
+            // nhờ vậy cancelAnimationFrame hủy được CẢ VSync, timer chờ VSync và fallback timer.
+            const pendingRafHandles = new Map();
+            let nextRafHandleId = 1;
 
             window.requestAnimationFrame = function(callback) {
                 const targetInterval = window.__targetFrameIntervalMs || 33;
                 const bgInterval = 50; // 20 nhịp/giây khi chạy ngầm ở app khác
-                let executed = false;
+                const handleId = nextRafHandleId++;
+                const handle = { timer: null, innerTimer: null, rafId: null, done: false };
+                pendingRafHandles.set(handleId, handle);
+
+                function releaseHandle() {
+                    if (handle.timer !== null) { clearTimeout(handle.timer); handle.timer = null; }
+                    if (handle.innerTimer !== null) { clearTimeout(handle.innerTimer); handle.innerTimer = null; }
+                    pendingRafHandles.delete(handleId);
+                }
 
                 function invokeSmoothly(rawNow) {
-                    if (executed) return;
-                    executed = true;
+                    if (handle.done) return;
+                    handle.done = true;
+                    // Dọn mọi timer còn treo TRƯỚC khi gọi callback, để không còn timer mồ côi
+                    releaseHandle();
 
                     const now = (typeof rawNow === 'number' && rawNow > 0) ? rawNow : performance.now();
                     const elapsed = now - lastFrameTime;
@@ -1087,35 +1110,57 @@ object GameScriptInjector {
 
                 // Nếu đang chạy ngầm ở app khác, dùng trực tiếp bộ đếm setTimeout để giữ game luôn chạy thực tế
                 if (window.__isAppInBackground || !originalRAF) {
-                    return setTimeout(function() {
+                    handle.timer = setTimeout(function() {
                         invokeSmoothly(performance.now());
                     }, bgInterval);
+                    return handleId;
                 }
 
                 // Khi ở tiền cảnh: kết hợp originalRAF (VSync) và phao cứu sinh fallback nếu VSync bị ngắt đột ngột
                 const nowCheck = performance.now();
                 const waitMs = Math.max(0, targetInterval - (nowCheck - lastFrameTime));
 
-                const fallbackTimer = setTimeout(function() {
+                handle.timer = setTimeout(function() {
                     invokeSmoothly(performance.now());
                 }, Math.max(waitMs + 45, 75));
 
-                if (waitMs <= 4) {
-                    originalRAF(function(ts) {
-                        clearTimeout(fallbackTimer);
+                const scheduleVSync = function() {
+                    if (handle.done || !originalRAF) return;
+                    handle.rafId = originalRAF(function(ts) {
+                        handle.rafId = null;
                         invokeSmoothly(ts);
                     });
+                };
+
+                if (waitMs <= 4) {
+                    scheduleVSync();
                 } else {
-                    setTimeout(function() {
-                        if (executed) return;
-                        originalRAF(function(ts) {
-                            clearTimeout(fallbackTimer);
-                            invokeSmoothly(ts);
-                        });
+                    handle.innerTimer = setTimeout(function() {
+                        handle.innerTimer = null;
+                        if (handle.done) return;
+                        scheduleVSync();
                     }, waitMs);
                 }
 
-                return fallbackTimer;
+                return handleId;
+            };
+
+            // Shim cancelAnimationFrame: hủy VSync đã đăng ký + mọi timer dự phòng của lần gọi đó.
+            // Nếu không có trong sổ (id do trang khác tạo trước khi inject) thì chuyển cho bản gốc.
+            window.cancelAnimationFrame = function(handleId) {
+                const handle = pendingRafHandles.get(handleId);
+                if (!handle) {
+                    if (originalCAF) { try { originalCAF(handleId); } catch(e) {} }
+                    return;
+                }
+                handle.done = true;
+                if (handle.timer !== null) { clearTimeout(handle.timer); handle.timer = null; }
+                if (handle.innerTimer !== null) { clearTimeout(handle.innerTimer); handle.innerTimer = null; }
+                if (handle.rafId !== null && originalCAF) {
+                    try { originalCAF(handle.rafId); } catch(e) {}
+                    handle.rafId = null;
+                }
+                pendingRafHandles.delete(handleId);
             };
 
             // =========================================================================

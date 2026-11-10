@@ -6,6 +6,7 @@ import android.graphics.Typeface
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.webkit.WebView
 import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -481,41 +482,36 @@ private fun createTabCardViewHolder(
         setBackgroundColor(AndroidColor.parseColor("#090D14"))
     }
 
-    // THUỐC ĐẶC TRỊ CHỐNG ĐÓNG POPUP <SELECT>: 
-    // Wrapper chặn triệt để các luồng đo đạc (measure) rác từ Jetpack Compose.
-    // Nguyên nhân sâu xa: Mỗi khi Compose vẽ lại màn hình (ví dụ khi cập nhật ping mạng hoặc stats),
-    // nó gọi measure() trên toàn bộ cây View. Khi WebView nhận lệnh measure() (dù kích thước không đổi),
-    // bộ máy Chromium mặc định sẽ "cẩn tắc vô áy náy" đóng sập ngay lập tức mọi menu Dropdown/Select đang mở.
-    val webViewWrapper = object : FrameLayout(context) {
-        private var lastWidthSpec = -1
-        private var lastHeightSpec = -1
-
-        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-            if (widthMeasureSpec == lastWidthSpec && heightMeasureSpec == lastHeightSpec) {
-                // Kích thước không đổi -> chặn đứng không cho truyền xuống WebView
-                setMeasuredDimension(measuredWidth, measuredHeight)
-                return
-            }
-            lastWidthSpec = widthMeasureSpec
-            lastHeightSpec = heightMeasureSpec
-            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
-        }
-    }.apply {
-        layoutParams = FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        )
-    }
-
-    // Gắn WebView độc lập của Tab
+    // Gắn WebView độc lập của Tab trực tiếp vào khung chứa.
+    // (Đã bỏ lớp wrapper chặn onMeasure: View.measure() vốn đã bỏ qua khi spec không đổi,
+    //  còn wrapper thì có thể đóng băng một kích thước sai sau khi đổi layout.)
     val webView = tabManager.getOrCreateWebView(tabIndex)
     (webView.parent as? ViewGroup)?.removeView(webView)
     webView.layoutParams = FrameLayout.LayoutParams(
         ViewGroup.LayoutParams.MATCH_PARENT,
         ViewGroup.LayoutParams.MATCH_PARENT
     )
-    webViewWrapper.addView(webView)
-    contentContainer.addView(webViewWrapper)
+    contentContainer.addView(webView)
+
+    // Ô hiển thị này chỉ được tạo 1 lần (remember), nên khi GameTabManager phải tạo lại WebView
+    // (bị thu hồi RAM / đổi Cụm) UI phải tự gắn WebView mới vào đúng ô.
+    // Chèn ở index 0 để không đè lên idleOverlay đang nằm phía trên.
+    var attachedWebView: WebView = webView
+    tabManager.registerSlot(tabIndex) { newWebView ->
+        if (newWebView !== attachedWebView) {
+            (attachedWebView.parent as? ViewGroup)?.removeView(attachedWebView)
+            attachedWebView = newWebView
+        }
+        (newWebView.parent as? ViewGroup)?.removeView(newWebView)
+        contentContainer.addView(
+            newWebView,
+            0,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+    }
 
     // GIAI ĐOẠN 1: Màn hình chờ (Idle Overlay) có nút [▶ Mở Tab X]
     val idleOverlay = LinearLayout(context).apply {

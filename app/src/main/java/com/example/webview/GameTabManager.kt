@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
@@ -105,15 +106,33 @@ class GameTabManager(
     private var loginQueueJob: Job? = null
     private var periodicWatchdogJob: Job? = null
     private var garbageCollectionJob: Job? = null
-    private val mainFrameRetryCount = IntArray(4)
+
+    // Đếm số lần tự tải lại khi lỗi máy chủ tạm thời, để không lặp vô hạn
+    private val mainFrameRetryCount = IntArray(4) { 0 }
+
+    // Lỗi main-frame gần nhất của từng tab. null = trang hiện tại không có lỗi.
+    // Dùng để onPageFinished biết đây là trang lỗi nội bộ của Chromium, không phải trang thật.
     private val lastMainFrameError = arrayOfNulls<Int>(4)
 
-    private fun isTrustedGameUrl(url: String?): Boolean =
-        PreferencesManager.isTrustedGameUrl(url)
+    // Mỗi tab giữ đúng 1 Runnable hẹn giờ tải lại để removeCallbacks được chính xác,
+    // tránh các lần postDelayed chồng lên nhau thành vòng lặp reload dày đặc.
+    private val retryRunnables = arrayOfNulls<Runnable>(4)
 
-    private fun trustedTargetUrl(customUrl: String): String =
-        if (customUrl.isBlank() || !isTrustedGameUrl(customUrl)) PreferencesManager.GAME_URL
-        else customUrl
+    // Callback gắn WebView vào đúng ô hiển thị của tab, do GameWebViewContainer đăng ký 1 lần
+    // (ô được tạo trong remember{} nên không tự tạo lại khi WebView bị thay thế).
+    private val slotAttachers = arrayOfNulls<(WebView) -> Unit>(4)
+
+    fun registerSlot(tabIndex: Int, attacher: (WebView) -> Unit) {
+        if (tabIndex in 0..3) {
+            slotAttachers[tabIndex] = attacher
+        }
+    }
+
+    companion object {
+        // Lỗi tạm thời: thử lại tối đa 3 lần, giãn cách tăng dần 2.5s -> 5s -> 7.5s
+        private const val MAX_MAIN_FRAME_RETRY = 3
+        private const val MAIN_FRAME_RETRY_BASE_MS = 2500L
+    }
 
     init {
         // Pre-create WebViews with strict Isolated Profiles, but DO NOT load URLs yet (Idle)
@@ -123,6 +142,14 @@ class GameTabManager(
             }
         }
         startBackgroundLoops()
+    }
+
+    private fun getClusterId(): String {
+        return when (prefs.getCluster()) {
+            "Cụm 2" -> "2"
+            "Cụm 3" -> "3"
+            else -> "1"
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -135,18 +162,15 @@ class GameTabManager(
         // =========================================================================
         // QUY CHUẨN 1: QUY TẮC SỐNG CÒN KHI KHỞI TẠO WEBVIEW
         // Dòng lệnh ĐẦU TIÊN ngay sau val webView = KeepAliveWebView(context) BẮT BUỘC phải là:
-        // WebViewCompat.setProfile(webView, "Isolated_Cluster_${prefs.getLegacyProfileId()}_Tab_${tabIndex}")
+        // WebViewCompat.setProfile(webView, "Isolated_Cluster_${clusterId}_Tab_${tabIndex}")
         // Tuyệt đối KHÔNG được gọi webView.settings, CookieManager, hay bất kỳ hàm nào
         // của webView trước dòng này để tránh bị khóa vào Default Profile!
         // =========================================================================
         val webView = KeepAliveWebView(contextWrappers[tabIndex])
+        val clusterId = getClusterId()
         if (WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)) {
             try {
-                // Preserve the last selected v3 profile so upgrades retain game sessions.
-                WebViewCompat.setProfile(
-                    webView,
-                    "Isolated_Cluster_${prefs.getLegacyProfileId()}_Tab_${tabIndex}"
-                )
+                WebViewCompat.setProfile(webView, "Isolated_Cluster_${clusterId}_Tab_${tabIndex}")
             } catch (_: Exception) {}
         }
 
@@ -169,7 +193,7 @@ class GameTabManager(
             cacheMode = WebSettings.LOAD_DEFAULT
             allowFileAccess = false
             allowContentAccess = false
-            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
+            mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
             userAgentString = if (isDesktopMode[tabIndex]) {
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
             } else {
@@ -181,16 +205,9 @@ class GameTabManager(
         webView.addJavascriptInterface(AndroidGameBridge(tabIndex), "AndroidBridge")
 
         webView.webViewClient = object : WebViewClient() {
-            override fun shouldOverrideUrlLoading(
-                view: WebView?,
-                request: WebResourceRequest?
-            ): Boolean {
-                val url = request?.url?.toString() ?: return true
-                return url != "about:blank" && !PreferencesManager.isTrustedGameUrl(url)
-            }
-
             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                 super.onPageStarted(view, url, favicon)
+                // Trang mới bắt đầu tải -> xóa dấu lỗi của lần tải trước
                 lastMainFrameError[tabIndex] = null
                 if (url != "about:blank" && isTabActive[tabIndex]) {
                     updateStatus(tabIndex, "Đang tải trang...")
@@ -199,18 +216,20 @@ class GameTabManager(
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                val fps = prefs.getFps()
+                view?.evaluateJavascript(GameScriptInjector.buildFpsLimiterScript(fps), null)
+                view?.evaluateJavascript(GameScriptInjector.buildAdjustViewportScript(), null)
+
                 if (url == null || url == "about:blank") {
                     updateStatus(tabIndex, "Chờ mở tab (Idle)")
-                } else if (isTabActive[tabIndex] && isTrustedGameUrl(url)) {
+                } else if (isTabActive[tabIndex]) {
+                    // onPageFinished vẫn được gọi cả khi trang lỗi (Chromium hiển thị trang lỗi nội bộ).
+                    // Nếu đang trong chuỗi thử lại thì giữ nguyên thông báo lỗi, không ghi đè thành
+                    // "Trang đã sẵn sàng" và không reset bộ đếm (reset sẽ thành thử lại vô hạn).
                     if (lastMainFrameError[tabIndex] == null) {
                         mainFrameRetryCount[tabIndex] = 0
                         updateStatus(tabIndex, "Trang đã sẵn sàng")
-                    } else {
-                        return
                     }
-                    val fps = prefs.getFps()
-                    view?.evaluateJavascript(GameScriptInjector.buildFpsLimiterScript(fps), null)
-                    view?.evaluateJavascript(GameScriptInjector.buildAdjustViewportScript(), null)
                     if (_isSystemRunning.value) {
                         val account = prefs.getAccount(tabIndex)
                         if (account.username.isNotBlank() && account.password.isNotBlank()) {
@@ -223,8 +242,7 @@ class GameTabManager(
                             // Chạy bồi thêm ở 350ms và 800ms khi SPA (React/Vue) vừa dựng xong khung Đăng nhập mới
                             listOf(350L, 800L).forEach { delayMs ->
                                 mainHandler.postDelayed({
-                                    if (_isSystemRunning.value && isTabActive[tabIndex] &&
-                                        isTrustedGameUrl(view?.url)) {
+                                    if (_isSystemRunning.value && isTabActive[tabIndex]) {
                                         val currentStats = _characterStatsList.value.getOrNull(tabIndex)
                                         if (currentStats?.state == TabLifecycleState.LOGGING_IN) {
                                             view?.evaluateJavascript(script, null)
@@ -242,7 +260,8 @@ class GameTabManager(
                 handler: android.webkit.SslErrorHandler?,
                 error: android.net.http.SslError?
             ) {
-                handler?.cancel()
+                // Đảm bảo không bị nghẽn chứng chỉ trung gian CDN Cloudflare Pages
+                handler?.proceed()
             }
 
             override fun onReceivedError(
@@ -251,29 +270,44 @@ class GameTabManager(
                 error: WebResourceError?
             ) {
                 super.onReceivedError(view, request, error)
-                if (request?.isForMainFrame == true && isTabActive[tabIndex] &&
-                    PreferencesManager.isTrustedGameUrl(request.url.toString())) {
-                    val code = error?.errorCode ?: 0
-                    lastMainFrameError[tabIndex] = code
-                    if (code == WebViewClient.ERROR_HOST_LOOKUP) {
-                        updateStatus(tabIndex, "❌ Không tìm thấy máy chủ game")
-                        return
-                    }
-                    val attempt = mainFrameRetryCount[tabIndex] + 1
-                    if (attempt > 3) {
-                        updateStatus(tabIndex, "❌ Máy chủ không phản hồi sau 3 lần thử")
-                        return
-                    }
-                    mainFrameRetryCount[tabIndex] = attempt
-                    updateStatus(tabIndex, "Đang kết nối lại máy chủ... (lần $attempt/3)")
-                    mainHandler.postDelayed({
-                        if (isTabActive[tabIndex] && _isSystemRunning.value) {
-                            val account = prefs.getAccount(tabIndex)
-                            val targetUrl = trustedTargetUrl(account.customUrl)
-                            view?.loadUrl(targetUrl)
-                        }
-                    }, 2500L * attempt)
+                if (request?.isForMainFrame != true || !isTabActive[tabIndex]) return
+
+                val code = error?.errorCode ?: 0
+                lastMainFrameError[tabIndex] = code
+
+                // Lỗi phân giải tên miền là lỗi vĩnh viễn: URL gõ sai hoặc domain không tồn tại.
+                // Thử lại chỉ tốn pin và data vô ích -> dừng hẳn và báo rõ cho người dùng.
+                if (code == WebViewClient.ERROR_HOST_LOOKUP) {
+                    updateStatus(tabIndex, "❌ Không tìm thấy máy chủ")
+                    return
                 }
+
+                // Lỗi tạm thời (mạng chập chờn, máy chủ từ chối): thử lại có giãn cách và có giới hạn,
+                // tránh vòng lặp tải lại vô hạn mỗi 2.5 giây khi máy chủ chết hẳn.
+                val attempt = mainFrameRetryCount[tabIndex] + 1
+                if (attempt > MAX_MAIN_FRAME_RETRY) {
+                    updateStatus(tabIndex, "❌ Máy chủ không phản hồi sau $MAX_MAIN_FRAME_RETRY lần thử")
+                    return
+                }
+                mainFrameRetryCount[tabIndex] = attempt
+
+                val delayMs = MAIN_FRAME_RETRY_BASE_MS * attempt
+                updateStatus(tabIndex, "Đang kết nối lại máy chủ... (lần $attempt/$MAX_MAIN_FRAME_RETRY)")
+
+                // Hủy lần hẹn giờ cũ của tab này trước khi đặt lần mới, để các postDelayed không chồng nhau
+                retryRunnables[tabIndex]?.let { mainHandler.removeCallbacks(it) }
+                val retryRunnable = Runnable {
+                    retryRunnables[tabIndex] = null
+                    if (isTabActive[tabIndex] && _isSystemRunning.value) {
+                        val account = prefs.getAccount(tabIndex)
+                        val targetUrl = account.customUrl.ifBlank { prefs.getClusterUrl(prefs.getCluster()) }
+                        try {
+                            (webViews[tabIndex] ?: view)?.loadUrl(targetUrl)
+                        } catch (_: Exception) {}
+                    }
+                }
+                retryRunnables[tabIndex] = retryRunnable
+                mainHandler.postDelayed(retryRunnable, delayMs)
             }
 
             // QUY CHUẨN 4: Tự cứu khi tiến trình WebView bị thu hồi RAM
@@ -281,6 +315,14 @@ class GameTabManager(
                 updateStatus(tabIndex, "Tiến trình WebView bị thu hồi RAM! Đang tự phục hồi...")
 
                 mainHandler.post {
+                    // Hủy lần hẹn giờ tải lại còn treo của tab, tránh reload vào WebView đã chết
+                    retryRunnables[tabIndex]?.let { mainHandler.removeCallbacks(it) }
+                    retryRunnables[tabIndex] = null
+                    // destroy() trên WebView còn gắn trong cây View là không hợp lệ: view đã destroy
+                    // vẫn bị measure/layout mỗi khung hình. Phải tháo khỏi cha trước khi destroy.
+                    try {
+                        (view?.parent as? ViewGroup)?.removeView(view)
+                    } catch (_: Exception) {}
                     try {
                         view?.destroy()
                     } catch (_: Exception) {}
@@ -297,6 +339,10 @@ class GameTabManager(
         webView.webChromeClient = WebChromeClient()
 
         webViews[tabIndex] = webView
+        // Nếu UI đã đăng ký ô hiển thị của tab này thì gắn ngay WebView vừa tạo vào ô đó
+        // (dùng cho trường hợp WebView được tạo lại: bị thu hồi RAM, đổi Cụm...).
+        // Lần khởi tạo đầu tiên UI chưa đăng ký -> attacher null, UI tự addView như cũ.
+        slotAttachers[tabIndex]?.invoke(webView)
         return webView
     }
 
@@ -306,13 +352,16 @@ class GameTabManager(
     fun loginAll() {
         _isSystemRunning.value = true
         KeepAliveService.start(context)
+        val cluster = prefs.getCluster()
+        val defaultUrl = prefs.getClusterUrl(cluster)
+
         startLoginStepLoop()
         coroutineScope.launch(Dispatchers.Main) {
             for (i in 0..3) {
                 if (!_isSystemRunning.value) break
                 isTabActive[i] = true
                 val account = prefs.getAccount(i)
-                val targetUrl = trustedTargetUrl(account.customUrl)
+                val targetUrl = account.customUrl.ifBlank { defaultUrl }
                 val wv = getOrCreateWebView(i)
                 wv.resumeTimers()
 
@@ -322,7 +371,7 @@ class GameTabManager(
                 val currentUrl = wv.url
                 val isGamePageLoaded = currentUrl != null &&
                     currentUrl != "about:blank" &&
-                    PreferencesManager.isTrustedGameUrl(currentUrl)
+                    (currentUrl.contains("volamidle") || currentUrl.contains("vlidle") || (account.customUrl.isNotBlank() && currentUrl.startsWith("http")))
                 if (!isGamePageLoaded) {
                     wv.loadUrl(targetUrl)
                 } else if (account.username.isNotBlank() && account.password.isNotBlank()) {
@@ -349,8 +398,10 @@ class GameTabManager(
         if (loginQueueJob?.isActive != true) {
             startLoginStepLoop()
         }
+        val cluster = prefs.getCluster()
+        val defaultUrl = prefs.getClusterUrl(cluster)
         val account = prefs.getAccount(tabIndex)
-        val targetUrl = trustedTargetUrl(account.customUrl)
+        val targetUrl = account.customUrl.ifBlank { defaultUrl }
 
         mainHandler.post {
             val wv = getOrCreateWebView(tabIndex)
@@ -361,7 +412,7 @@ class GameTabManager(
             val currentUrl = wv.url
             val isGamePageLoaded = currentUrl != null &&
                 currentUrl != "about:blank" &&
-                PreferencesManager.isTrustedGameUrl(currentUrl)
+                (currentUrl.contains("volamidle") || currentUrl.contains("vlidle") || (account.customUrl.isNotBlank() && currentUrl.startsWith("http")))
             if (!isGamePageLoaded) {
                 wv.loadUrl(targetUrl)
             } else if (account.username.isNotBlank() && account.password.isNotBlank()) {
@@ -378,8 +429,10 @@ class GameTabManager(
     // QUY CHUẨN 4: Tự mở lại Tab và đăng nhập lại khi bị văng
     fun reopenAndReloginTab(tabIndex: Int) {
         if (!_isSystemRunning.value || !isTabActive[tabIndex]) return
+        val cluster = prefs.getCluster()
+        val defaultUrl = prefs.getClusterUrl(cluster)
         val account = prefs.getAccount(tabIndex)
-        val targetUrl = trustedTargetUrl(account.customUrl)
+        val targetUrl = account.customUrl.ifBlank { defaultUrl }
 
         mainHandler.post {
             val wv = getOrCreateWebView(tabIndex)
@@ -591,6 +644,33 @@ class GameTabManager(
         }
     }
 
+    // Đổi Cụm
+    fun switchCluster(newCluster: String) {
+        prefs.setCluster(newCluster)
+        if (_isSystemRunning.value) {
+            // Re-create WebViews with new profile
+            mainHandler.post {
+                for (i in 0..3) {
+                    // Hủy lần hẹn giờ tải lại còn treo, tránh reload vào WebView sắp bị destroy
+                    retryRunnables[i]?.let { mainHandler.removeCallbacks(it) }
+                    retryRunnables[i] = null
+                    mainFrameRetryCount[i] = 0
+                    lastMainFrameError[i] = null
+                    // destroy() chỉ hợp lệ khi WebView đã rời cây View (xem onRenderProcessGone)
+                    try {
+                        val old = webViews[i]
+                        (old?.parent as? ViewGroup)?.removeView(old)
+                    } catch (_: Exception) {}
+                    try {
+                        webViews[i]?.destroy()
+                    } catch (_: Exception) {}
+                    webViews[i] = null
+                }
+                loginAll()
+            }
+        }
+    }
+
     private fun startLoginStepLoop() {
         loginQueueJob?.cancel()
         loginQueueJob = coroutineScope.launch(Dispatchers.Main) {
@@ -602,6 +682,12 @@ class GameTabManager(
                             val currentStats = _characterStatsList.value.getOrNull(i)
                             if (currentStats?.state == TabLifecycleState.LOGGING_IN) {
                                 val wv = webViews[i]
+                                // Tạm dừng 5 giây nếu người dùng vừa chạm tay vào tab này:
+                                // mỗi lần inject là một lượt quét DOM + click tổng hợp, có thể
+                                // đóng sập dropdown/select đang mở của người dùng.
+                                if (wv != null && System.currentTimeMillis() - wv.lastTouchTimeMs < 5000L) {
+                                    continue
+                                }
                                 if (wv != null && wv.url != null && wv.url != "about:blank") {
                                     val account = prefs.getAccount(i)
                                     val script = GameScriptInjector.buildAutoLoginStepScript(
@@ -692,6 +778,13 @@ class GameTabManager(
         garbageCollectionJob?.cancel()
         mainHandler.post {
             for (i in 0..3) {
+                retryRunnables[i]?.let { mainHandler.removeCallbacks(it) }
+                retryRunnables[i] = null
+                // Tháo khỏi cây View trước khi destroy (xem onRenderProcessGone)
+                try {
+                    val old = webViews[i]
+                    (old?.parent as? ViewGroup)?.removeView(old)
+                } catch (_: Exception) {}
                 try {
                     webViews[i]?.destroy()
                 } catch (_: Exception) {}
@@ -714,7 +807,6 @@ class GameTabManager(
         @JavascriptInterface
         fun onGameKickedDetected(idx: Int) {
             mainHandler.post {
-                if (idx != tabIndex || !isTrustedGameUrl(webViews[tabIndex]?.url)) return@post
                 if (_isSystemRunning.value && isTabActive[tabIndex]) {
                     setTabState(tabIndex, TabLifecycleState.LOGGING_IN)
                     updateStatus(tabIndex, "⚡ Tự động đăng nhập...")
