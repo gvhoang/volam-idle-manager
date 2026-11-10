@@ -60,7 +60,9 @@ fun SidebarView(
     modifier: Modifier = Modifier.width(265.dp),
     getAccount: ((Int) -> com.example.model.AccountConfig)? = null,
     isBlackScreenSynced: Boolean = false,
-    onSyncBlackScreen: (Boolean) -> Unit = {}
+    onSyncBlackScreen: (Boolean) -> Unit = {},
+    isAutoPilotOn: Boolean = false,
+    onOpenAutoConfig: () -> Unit = {}
 ) {
     Surface(
         modifier = modifier
@@ -361,6 +363,37 @@ fun SidebarView(
                         maxLines = 1
                     )
                 }
+            }
+
+            Spacer(modifier = Modifier.height(6.dp))
+
+            // MODULE 8: Mở bảng 🤖 Tự động (bản Android của mục "Tự động" trong Manager PC).
+            // Màu hổ phách để tách khỏi nhóm nút đồng bộ chế độ và không lẫn với "Màn hình đen".
+            Button(
+                onClick = onOpenAutoConfig,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(34.dp)
+                    .testTag("open_auto_config_button"),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = if (isAutoPilotOn) Color(0xFF065F46) else Color(0xFF78350F)
+                ),
+                shape = RoundedCornerShape(6.dp),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+            ) {
+                Text(
+                    text = "🤖 Tự động",
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = if (isAutoPilotOn) "🟢 ĐANG BẬT" else "⚪ Đang tắt",
+                    fontSize = 8.5.sp,
+                    color = if (isAutoPilotOn) Color(0xFF6EE7B7) else Color(0xFFFCD34D),
+                    maxLines = 1
+                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))

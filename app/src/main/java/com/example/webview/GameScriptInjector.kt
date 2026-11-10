@@ -807,7 +807,14 @@ object GameScriptInjector {
                     return txt.replace(/\n+/g, ' ').replace(/\s+/g, ' ').trim();
                 }
 
-                const bodyText = document.body ? (document.body.innerText || '') : '';
+                // Loại văn bản trong khung chat khỏi bodyText: người chơi gõ "tạo nhân vật",
+                // "nhớ tài khoản", "đăng ký tài khoản" vào chat sẽ khiến các kiểm tra auth bên
+                // dưới tưởng nhầm là màn đăng nhập và kích hoạt đăng nhập lại liên tục.
+                let bodyText = document.body ? (document.body.innerText || '') : '';
+                for (const chatId of ['chatLines', 'u20lines', 'u20log', 'chatBox']) {
+                    const cel = document.getElementById(chatId);
+                    if (cel && cel.innerText) bodyText = bodyText.split(cel.innerText).join(' ');
+                }
                 const bodyNA = noAccent(bodyText);
                 const allElements = Array.from(document.querySelectorAll('button, [role="button"], a, div, span, p, label'));
 
@@ -992,7 +999,17 @@ object GameScriptInjector {
         return """
         (function() {
             try {
-                const chatSelectors = ['.chat-messages', '.log-container', '#chat-box', '.combat-log', '[class*="chat"]', '[class*="message"]'];
+                // Không dọn khi người dùng đang gõ (chat/ô nhập đang focus) — tránh xoá node
+                // ngay dưới tay người dùng và tránh làm handler blur/focus chạy sai thứ tự.
+                const ae = document.activeElement;
+                if (ae) {
+                    const t = (ae.tagName || '').toUpperCase();
+                    if (t === 'INPUT' || t === 'TEXTAREA' || t === 'SELECT' || ae.isContentEditable) return;
+                }
+                // Chỉ dùng id thật của game (chat log không có class). TUYỆT ĐỐI không dùng
+                // [class*="chat"]: selector đó khớp cả body.nochat, và script xoá các node con
+                // đầu tiên -> có thể xoá #app và làm sập toàn bộ game.
+                const chatSelectors = ['#chatLines', '#u20lines'];
                 for (const selector of chatSelectors) {
                     const containers = document.querySelectorAll(selector);
                     containers.forEach(container => {
@@ -1007,8 +1024,9 @@ object GameScriptInjector {
                         }
                     });
                 }
-                // Dọn các hiệu ứng số sát thương nổi (floating text) bị tồn đọng nếu có
-                const floatingSelectors = ['.floating-text', '.damage-text', '.damage-number', '[class*="floating"]'];
+                // Dọn các hiệu ứng số sát thương nổi (floating text) bị tồn đọng nếu có.
+                // Bỏ [class*="floating"] (khớp quá rộng), chỉ dùng class cụ thể.
+                const floatingSelectors = ['.floating-text', '.damage-text', '.damage-number'];
                 for (const sel of floatingSelectors) {
                     const nodes = document.querySelectorAll(sel);
                     if (nodes.length > 20) {
@@ -1051,7 +1069,14 @@ object GameScriptInjector {
                 window.addEventListener('visibilitychange', blockBgEvents, true);
                 document.addEventListener('visibilitychange', blockBgEvents, true);
                 document.addEventListener('webkitvisibilitychange', blockBgEvents, true);
-                window.addEventListener('blur', blockBgEvents, true);
+                // CHỈ chặn blur của CHÍNH window (app mất focus), KHÔNG chặn blur của từng ô nhập.
+                // Blur của element cũng đi qua capture trên window; chặn tất cả sẽ giết mọi handler
+                // onblur của trang. Game dựa vào blur của #u20txt để gỡ class body.u2kb (chế độ bàn
+                // phím ảo); nếu blur bị chặn thì u2kb kẹt vĩnh viễn -> ẩn thanh kỹ năng, thu khung
+                // chat còn 3 dòng, khoá cuộn trang => "chat xong là bị treo khung".
+                window.addEventListener('blur', function(e) {
+                    if (e.target === window || e.target === document) blockBgEvents(e);
+                }, true);
                 window.addEventListener('pagehide', blockBgEvents, true);
             } catch(e) {}
 

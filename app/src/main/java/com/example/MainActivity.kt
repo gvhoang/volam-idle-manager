@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import com.example.model.ViewLayoutMode
 import com.example.ui.MainViewModel
 import com.example.ui.components.AccountDialog
+import com.example.ui.components.AutoConfigDialog
 import com.example.ui.components.GameWebViewContainer
 import com.example.ui.components.HeaderBar
 import com.example.ui.components.OledBlackScreen
@@ -98,8 +99,11 @@ fun MainScreen(
     val isSleepMode by viewModel.isSleepMode.collectAsState()
     val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
     val layoutMode by viewModel.layoutMode.collectAsState()
+    val cluster by viewModel.cluster.collectAsState()
     val editingAccount by viewModel.editingAccount.collectAsState()
     val isBlackScreenSynced by viewModel.isBlackScreenSynced.collectAsState()
+    val autoConfig by viewModel.autoConfig.collectAsState()
+    val isAutoDialogVisible by viewModel.isAutoDialogVisible.collectAsState()
 
     // Handle brightness adjustments when Sleep Mode toggles
     LaunchedEffect(isSleepMode) {
@@ -107,10 +111,11 @@ fun MainScreen(
     }
 
     // Back button handling
-    BackHandler(enabled = isSleepMode || editingAccount != null || (isPortrait && isSidebarVisible)) {
+    BackHandler(enabled = isSleepMode || editingAccount != null || isAutoDialogVisible || (isPortrait && isSidebarVisible)) {
         when {
             isSleepMode -> viewModel.setSleepMode(false)
             editingAccount != null -> viewModel.dismissAccountDialog()
+            isAutoDialogVisible -> viewModel.dismissAutoConfigDialog()
             isPortrait && isSidebarVisible -> viewModel.toggleSidebar()
         }
     }
@@ -130,6 +135,8 @@ fun MainScreen(
                 HeaderBar(
                     isSidebarVisible = isSidebarVisible,
                     onToggleSidebar = { viewModel.toggleSidebar() },
+                    currentCluster = cluster,
+                    onChangeCluster = { viewModel.changeCluster(it) },
                     networkData = networkData,
                     onResetNetworkStats = { viewModel.resetNetworkCounters() },
                     fps = fps,
@@ -181,6 +188,8 @@ fun MainScreen(
                                 getAccount = { viewModel.prefs.getAccount(it) },
                                 isBlackScreenSynced = isBlackScreenSynced,
                                 onSyncBlackScreen = { viewModel.syncBlackScreen(it) },
+                                isAutoPilotOn = autoConfig.on,
+                                onOpenAutoConfig = { viewModel.openAutoConfigDialog() },
                                 modifier = Modifier
                                     .fillMaxHeight()
                                     .width(320.dp)
@@ -209,6 +218,8 @@ fun MainScreen(
                                 getAccount = { viewModel.prefs.getAccount(it) },
                                 isBlackScreenSynced = isBlackScreenSynced,
                                 onSyncBlackScreen = { viewModel.syncBlackScreen(it) },
+                                isAutoPilotOn = autoConfig.on,
+                                onOpenAutoConfig = { viewModel.openAutoConfigDialog() },
                                 modifier = Modifier.width(265.dp)
                             )
                         }
@@ -240,6 +251,16 @@ fun MainScreen(
                     accountConfig = account,
                     onSave = { updated -> viewModel.saveEditingAccount(updated) },
                     onDismiss = { viewModel.dismissAccountDialog() }
+                )
+            }
+
+            // Bảng 🤖 Tự động (cấu hình dùng chung cho cả 4 tab)
+            if (isAutoDialogVisible) {
+                AutoConfigDialog(
+                    config = autoConfig,
+                    onSave = { updated -> viewModel.saveAutoConfig(updated) },
+                    onResetCounters = { viewModel.resetAutoDailyCounters() },
+                    onDismiss = { viewModel.dismissAutoConfigDialog() }
                 )
             }
         }

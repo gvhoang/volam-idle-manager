@@ -10,6 +10,7 @@ import com.example.model.CharacterStats
 import com.example.model.NetworkDataInfo
 import com.example.model.ViewLayoutMode
 import com.example.network.TrafficMonitor
+import com.example.webview.AutoConfig
 import com.example.webview.GameTabManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -42,11 +43,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _layoutMode = MutableStateFlow(ViewLayoutMode.FOUR_COLUMNS)
     val layoutMode: StateFlow<ViewLayoutMode> = _layoutMode.asStateFlow()
 
+    private val _cluster = MutableStateFlow(prefs.getCluster())
+    val cluster: StateFlow<String> = _cluster.asStateFlow()
+
     private val _editingAccount = MutableStateFlow<AccountConfig?>(null)
     val editingAccount: StateFlow<AccountConfig?> = _editingAccount.asStateFlow()
 
     private val _isBlackScreenSynced = MutableStateFlow(false)
     val isBlackScreenSynced: StateFlow<Boolean> = _isBlackScreenSynced.asStateFlow()
+
+    // Cấu hình 🤖 Tự động: nguồn sự thật là chuỗi JSON trong PreferencesManager.
+    // StateFlow chỉ là bản đọc ra cho Compose; mặc định on = false khi chưa từng lưu.
+    private val _autoConfig = MutableStateFlow(AutoConfig.fromJson(prefs.getAutoConfig()))
+    val autoConfig: StateFlow<AutoConfig> = _autoConfig.asStateFlow()
+
+    private val _isAutoDialogVisible = MutableStateFlow(false)
+    val isAutoDialogVisible: StateFlow<Boolean> = _isAutoDialogVisible.asStateFlow()
 
     val isSystemRunning: StateFlow<Boolean> = tabManager.isSystemRunning
     val isMasterAutoRunning: StateFlow<Boolean> = tabManager.isSystemRunning
@@ -104,6 +116,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun changeCluster(newCluster: String) {
+        _cluster.value = newCluster
+        tabManager.switchCluster(newCluster)
+    }
+
     // MODULE 7: Sync auto mode (Nhiệm Vụ, Phó Bản, Luyện Công)
     fun syncAutoMode(mode: String) {
         tabManager.syncAutoMode(mode)
@@ -120,6 +137,32 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         prefs.resetTrafficCounters(current.totalRxBytes, current.totalTxBytes)
         val refreshed = trafficMonitor.sample(current.totalRxBytes, current.totalTxBytes)
         _networkData.value = refreshed
+    }
+
+    // ===== MODULE 8: Tự động trong game (bảng 🤖) =====
+    // Đọc lại từ prefs mỗi lần mở: nếu tiến trình từng bị thu hồi giữa chừng, hộp thoại
+    // vẫn mở ra đúng cấu hình đã ghi chứ không phải bản trong bộ nhớ.
+    fun openAutoConfigDialog() {
+        _autoConfig.value = AutoConfig.fromJson(prefs.getAutoConfig())
+        _isAutoDialogVisible.value = true
+    }
+
+    fun dismissAutoConfigDialog() {
+        _isAutoDialogVisible.value = false
+    }
+
+    fun saveAutoConfig(config: AutoConfig) {
+        val json = config.toJson().toString()
+        prefs.setAutoConfig(json)
+        _autoConfig.value = config
+        _isAutoDialogVisible.value = false
+        // Đẩy ngay xuống các tab đang mở, không đợi nhịp 30 giây: bấm tắt phải có hiệu lực
+        // trước lần mua kế tiếp.
+        tabManager.updateAutoConfig(json)
+    }
+
+    fun resetAutoDailyCounters() {
+        tabManager.resetAutoDailyCounters()
     }
 
     fun startEditingAccount(tabIndex: Int) {

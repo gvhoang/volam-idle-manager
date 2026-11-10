@@ -122,6 +122,30 @@ class GameTabManager(
     // (ô được tạo trong remember{} nên không tự tạo lại khi WebView bị thay thế).
     private val slotAttachers = arrayOfNulls<(WebView) -> Unit>(4)
 
+    // =========================================================================
+    // MODULE 8: TỰ ĐỘNG TRONG GAME
+    // Chỉ giữ script sống trên từng tab và đẩy cấu hình; toàn bộ quyết định mua/nhận/đổi
+    // nằm trong JS của trang (GameAutoPilot). Vòng lặp chạy vô hại khi cấu hình đang tắt.
+    // =========================================================================
+    private val autoPilot: GameAutoPilot = GameAutoPilot(
+        scope = coroutineScope,
+        tabCount = 4,
+        initialConfigJson = prefs.getAutoConfig(),
+        webViewAt = { i -> webViews.getOrNull(i) },
+        isTabActive = { i -> isTabActive.getOrNull(i) == true },
+        isSystemRunning = { _isSystemRunning.value }
+    )
+
+    /** Người dùng vừa lưu bảng 🤖: ghi nhận và bơm ngay xuống các tab đang mở. */
+    fun updateAutoConfig(json: String?) {
+        autoPilot.updateConfig(json)
+    }
+
+    /** Xoá bộ đếm ngày (localStorage vlm_auto_*) trên các tab đang chạy. */
+    fun resetAutoDailyCounters() {
+        autoPilot.resetDailyCounters()
+    }
+
     fun registerSlot(tabIndex: Int, attacher: (WebView) -> Unit) {
         if (tabIndex in 0..3) {
             slotAttachers[tabIndex] = attacher
@@ -149,6 +173,9 @@ class GameTabManager(
             }
         }
         startBackgroundLoops()
+        // Bắt đầu vòng giữ script tự động. Nếu cấu hình đã lưu đang bật thì tự khôi phục
+        // sau khi mở lại app; nếu tắt (mặc định) thì vòng lặp chỉ ngủ.
+        autoPilot.start()
     }
 
     private fun getClusterId(): String {
@@ -450,6 +477,8 @@ class GameTabManager(
             setTabState(tabIndex, TabLifecycleState.LOGGING_IN)
             updateStatus(tabIndex, "⚡ Tự động mở lại...")
             wv.loadUrl(targetUrl)
+            // Trang mới = ngữ cảnh JS mới: buộc cài lại script tự động ngay nhịp kế tiếp.
+            autoPilot.onTabRestarted(tabIndex)
         }
     }
 
@@ -792,6 +821,7 @@ class GameTabManager(
         loginQueueJob?.cancel()
         periodicWatchdogJob?.cancel()
         garbageCollectionJob?.cancel()
+        autoPilot.shutdown()
         mainHandler.post {
             for (i in 0..3) {
                 retryRunnables[i]?.let { mainHandler.removeCallbacks(it) }

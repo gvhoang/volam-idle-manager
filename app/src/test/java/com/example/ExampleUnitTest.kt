@@ -32,7 +32,8 @@ class ExampleUnitTest {
     val watchdogScript = com.example.webview.GameScriptInjector.buildPeriodicWatchdogAndScanScript(0)
     assertTrue("Watchdog script must contain 'Chơi ở đây'", watchdogScript.contains("Chơi ở đây"))
     assertTrue("Watchdog script must contain 'Chơi ở tab này'", watchdogScript.contains("Chơi ở tab này"))
-    assertTrue("Watchdog script must declare bodyText", watchdogScript.contains("const bodyText ="))
+    // bodyText nay la "let" vi duoc loc bo van ban khung chat truoc khi kiem tra auth
+    assertTrue("Watchdog script must declare bodyText", watchdogScript.contains("let bodyText ="))
     assertTrue("Watchdog script must declare allElements", watchdogScript.contains("const allElements ="))
   }
 
