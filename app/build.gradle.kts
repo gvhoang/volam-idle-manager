@@ -16,8 +16,8 @@ android {
     applicationId = "com.aistudio.volamidle.qkrvtp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "3.0.1"
+    versionCode = 4
+    versionName = "4.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
