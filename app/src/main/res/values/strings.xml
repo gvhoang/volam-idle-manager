@@ -1,3 +1,65 @@
 <resources>
     <string name="app_name">Võ Lâm Idle</string>
+
+    <!-- ===================================================================
+         TỰ ĐỘNG CẬP NHẬT — chuỗi lấy nguyên văn từ docs/DESIGN-AUTOUPDATE.md §6.2
+         và phần lý do thất bại §5.5. Không sửa chữ nào ở đây: UI, receiver và
+         repository đọc chung các khoá này.
+         =================================================================== -->
+    <string name="update_version_row">📦 Phiên bản: %1$s</string>
+    <string name="update_btn_check">Kiểm tra cập nhật</string>
+    <string name="update_state_checking">Đang kiểm tra…</string>
+    <string name="update_state_uptodate">Đã là bản mới nhất</string>
+    <string name="update_state_available">Có bản mới %1$s • %2$s</string>
+    <string name="update_btn_download">Tải về</string>
+    <string name="update_state_downloading">Đang tải… %1$d%%</string>
+    <string name="update_state_verifying">Đang kiểm tra tệp…</string>
+    <string name="update_btn_install">Cài đặt</string>
+    <string name="update_state_needs_permission">Cần bật "Cài đặt ứng dụng không rõ nguồn gốc" cho ứng dụng này</string>
+    <string name="update_btn_open_settings">Mở cài đặt</string>
+    <string name="update_state_installing">Đang mở trình cài đặt…</string>
+    <string name="update_state_nonetwork">Không có mạng. Thử lại sau.</string>
+    <string name="update_state_ratelimited">GitHub đang giới hạn truy cập. Thử lại sau ít phút.</string>
+    <string name="update_state_unparsable">Không đọc được số phiên bản của bản phát hành mới.</string>
+    <string name="update_btn_open_releases">Mở trang phát hành</string>
+    <string name="update_banner_available">Bản %1$s đã có • Cập nhật</string>
+    <string name="update_confirm_title">Cài bản %1$s?</string>
+    <string name="update_confirm_body">Dung lượng %1$s. Cài đặt sẽ đóng ứng dụng, các tab game sẽ tải lại.</string>
+    <string name="update_confirm_ok">Cài đặt</string>
+    <string name="update_confirm_cancel">Để sau</string>
+    <string name="update_error_sha">Tệp tải về bị lỗi (sai SHA-256). Đã xoá, thử tải lại.</string>
+    <string name="update_error_storage">Không đủ dung lượng trống (cần khoảng %1$s).</string>
+    <string name="update_error_host">Máy chủ tải về không hợp lệ.</string>
+    <string name="update_error_no_asset">Bản phát hành không kèm tệp APK.</string>
+    <string name="update_error_signature">Không cài được: bản cập nhật được ký bằng khóa khác với bản đang cài. Phải gỡ ứng dụng rồi cài lại — toàn bộ tài khoản đã lưu sẽ mất.</string>
+    <string name="update_error_downgrade">Không cài được: bản cập nhật không mới hơn bản đang dùng.</string>
+    <string name="update_error_invalid_apk">Tệp APK không hợp lệ hoặc bị hỏng.</string>
+    <string name="update_error_blocked">Hệ thống hoặc Play Protect đã chặn cài đặt.</string>
+    <string name="update_error_aborted">Bạn đã huỷ cài đặt.</string>
+    <string name="update_error_generic">Cài đặt thất bại (%1$s).</string>
+    <string name="update_banner_updated">Đã cập nhật lên %1$s — chạm để mở</string>
+    <string name="cd_update_check">Kiểm tra cập nhật</string>
+    <string name="cd_update_download">Tải bản cập nhật</string>
+    <string name="cd_update_install">Cài bản cập nhật</string>
+
+    <!-- Kết quả cài đặt (§5.5). Những câu trùng nguyên văn với §6.2 dùng lại
+         khoá update_error_* ở trên; chỉ khai báo mới phần chưa có. -->
+    <string name="update_result_success">Đã cập nhật lên %1$s.</string>
+    <string name="update_result_conflict">Xung đột gói: đã có ứng dụng khác cùng tên.</string>
+    <string name="update_result_storage">Không đủ dung lượng để cài đặt.</string>
+    <string name="update_result_timeout">Hết thời gian chờ cài đặt.</string>
+    <string name="update_notif_channel">Cập nhật ứng dụng</string>
+
+    <!-- ===================================================================
+         SỐ TAB 1..8 — chuỗi lấy nguyên văn từ docs/DESIGN-TAB-COUNT.md §6.
+         =================================================================== -->
+    <string name="tab_count_label">SỐ TAB</string>
+    <string name="tab_count_warn_inline">⚠️ Trên 4 tab: mỗi tab là một tiến trình Chromium riêng, tốn khoảng 280–320 MB RAM.\n8 tab cần khoảng 2,4 GB. Máy thiếu RAM sẽ tự đóng tab cũ nhất và app phải tải lại tab đó.</string>
+    <string name="tab_count_confirm_grow">Chạy %1$d tab cần khoảng %2$s GB RAM và %3$d%% CPU.\nThiết bị không đủ RAM sẽ tự đóng tab cũ và tab đó phải đăng nhập lại. Tiếp tục?</string>
+    <string name="tab_count_confirm_shrink">Giảm xuống %1$d tab sẽ DỪNG tab %2$d–%3$d. Tài khoản vẫn được lưu; tăng lại số tab sau sẽ tự đăng nhập lại. Tiếp tục?</string>
+    <string name="tab_count_low_ram_block">Máy này không đủ RAM cho hơn 4 tab.</string>
+    <string name="tab_count_confirm_ok">Tiếp tục</string>
+    <string name="tab_count_confirm_cancel">Hủy</string>
+    <string name="cd_tab_count_decrease">Giảm số tab</string>
+    <string name="cd_tab_count_increase">Tăng số tab</string>
 </resources>

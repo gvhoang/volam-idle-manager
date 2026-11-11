@@ -118,7 +118,11 @@ data class AutoConfig(
  */
 class GameAutoPilot(
     private val scope: CoroutineScope,
-    private val tabCount: Int,
+    /**
+     * Số tab đang chạy, đọc LẠI mỗi nhịp. Không nhận Int cố định: người dùng đổi số tab
+     * giữa phiên, và vòng giữ script phải tự thu theo — không được giữ index đã chết.
+     */
+    private val tabCount: () -> Int,
     initialConfigJson: String?,
     private val webViewAt: (Int) -> KeepAliveWebView?,
     private val isTabActive: (Int) -> Boolean,
@@ -147,7 +151,9 @@ class GameAutoPilot(
     private var cfg: AutoConfig = AutoConfig.fromJson(initialConfigJson)
 
     // URL lúc cài script của từng tab. Lệch URL => trang đã đổi => phải cài lại.
-    private val installedUrl = arrayOfNulls<String>(tabCount)
+    // Cấp phát một lần ở trần slot cứng: index tab không bao giờ vượt quá nó, còn số tab
+    // đang chạy đọc qua `tabCount()`.
+    private val installedUrl = arrayOfNulls<String>(com.example.model.TabLimits.SLOT_COUNT)
 
     private var ticks = 0L
     private var job: Job? = null
@@ -186,7 +192,8 @@ class GameAutoPilot(
     fun updateConfig(json: String?) {
         cfg = AutoConfig.fromJson(json)
         ticks = 0
-        for (i in 0 until tabCount) {
+        // Xoá mọi dấu URL (kể cả slot chưa dùng): cấu hình đổi thì mọi tab phải cài lại script.
+        for (i in installedUrl.indices) {
             installedUrl[i] = null
         }
         if (job == null || job?.isActive != true) start()
@@ -196,7 +203,7 @@ class GameAutoPilot(
     /** Xoá bộ đếm ngày trên mọi tab (mở khoá khi bộ đếm lệch ngày của game). */
     fun resetDailyCounters() {
         mainHandler.post {
-            for (i in 0 until tabCount) {
+            for (i in 0 until tabCount().coerceAtMost(installedUrl.size)) {
                 val wv = webViewAt(i) ?: continue
                 if (!isTabActive(i)) continue
                 if (wv.url == null || wv.url == "about:blank") continue
@@ -207,7 +214,15 @@ class GameAutoPilot(
 
     /** Gọi khi một tab được mở lại: buộc cài lại script ở nhịp kế tiếp. */
     fun onTabRestarted(tabIndex: Int) {
-        if (tabIndex in 0 until tabCount) installedUrl[tabIndex] = null
+        if (tabIndex in installedUrl.indices) installedUrl[tabIndex] = null
+    }
+
+    /**
+     * Gọi khi giảm số tab: slot [tabIndex] vừa bị destroy. Xoá dấu URL để nếu người dùng
+     * tăng số tab trở lại, vòng giữ script cài lại từ đầu thay vì tưởng trang vẫn còn.
+     */
+    fun onTabRemoved(tabIndex: Int) {
+        if (tabIndex in installedUrl.indices) installedUrl[tabIndex] = null
     }
 
     private fun tickNow() {
@@ -229,7 +244,7 @@ class GameAutoPilot(
 
     private fun injectAll(forceFull: Boolean, cfgJson: String) {
         if (!cfg.on) return
-        for (i in 0 until tabCount) {
+        for (i in 0 until tabCount().coerceAtMost(installedUrl.size)) {
             if (!isTabActive(i)) {
                 installedUrl[i] = null
                 continue

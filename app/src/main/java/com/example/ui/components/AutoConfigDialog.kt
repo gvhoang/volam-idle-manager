@@ -54,6 +54,7 @@ import com.example.webview.AutoConfig
 @Composable
 fun AutoConfigDialog(
     config: AutoConfig,
+    tabCount: Int,
     onSave: (AutoConfig) -> Unit,
     onResetCounters: () -> Unit,
     onDismiss: () -> Unit
@@ -118,7 +119,7 @@ fun AutoConfigDialog(
                                 fontWeight = FontWeight.Bold
                             )
                             Text(
-                                text = if (draft.on) "🟢 Đang bật cho 4 tab" else "⚪ Đang tắt",
+                                text = if (draft.on) "🟢 Đang bật cho $tabCount tab" else "⚪ Đang tắt",
                                 color = if (draft.on) Color(0xFF6EE7B7) else Color(0xFF94A3B8),
                                 fontSize = 9.sp
                             )

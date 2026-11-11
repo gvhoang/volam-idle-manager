@@ -3,13 +3,18 @@ package com.example.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.BuildConfig
 import com.example.KeepAliveService
+import com.example.VolamIdleApp
 import com.example.data.PreferencesManager
 import com.example.model.AccountConfig
 import com.example.model.CharacterStats
 import com.example.model.NetworkDataInfo
+import com.example.model.TabLimits
 import com.example.model.ViewLayoutMode
 import com.example.network.TrafficMonitor
+import com.example.update.UpdateRepository
+import com.example.update.UpdateUiState
 import com.example.webview.AutoConfig
 import com.example.webview.GameTabManager
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +29,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     val prefs = PreferencesManager(application)
     val trafficMonitor = TrafficMonitor(application)
     val tabManager = GameTabManager(application, prefs, viewModelScope)
+
+    // ===== Tự động cập nhật =====
+    // Repository sống ở Application (process-scoped): vòng kiểm tra 12h không được chết
+    // theo Activity, và kết quả cài đặt của process trước nằm trong prefs nó đọc lúc tạo.
+    private val updateRepository: UpdateRepository? =
+        (application as? VolamIdleApp)?.updateRepository
+
+    /** Trạng thái UI; `null` repository (môi trường test) thì đứng yên ở Idle. */
+    val updateState: StateFlow<UpdateUiState> =
+        updateRepository?.state ?: MutableStateFlow(UpdateUiState.Idle)
+
+    val appVersionName: String = BuildConfig.VERSION_NAME
 
     private val _networkData = MutableStateFlow(NetworkDataInfo())
     val networkData: StateFlow<NetworkDataInfo> = _networkData.asStateFlow()
@@ -75,14 +92,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     // Trạng thái UA PC từng tab. GameTabManager.toggleDesktopMode() trả về trạng thái MỚI nên
     // bản sao này luôn khớp với nguồn sự thật trong tabManager; nút PC trong sheet đọc từ đây
     // thay vì tự suy ra từ màu nền nút như mini-header cũ.
-    private val _desktopModeStates = MutableStateFlow(List(4) { false })
+    // Kích thước = SLOT_COUNT chứ không phải 4: tab 4..7 phải có ô riêng, nếu không nút PC
+    // trong sheet hiện sai trạng thái (rủi ro R6).
+    private val _desktopModeStates = MutableStateFlow(List(TabLimits.SLOT_COUNT) { false })
     val desktopModeStates: StateFlow<List<Boolean>> = _desktopModeStates.asStateFlow()
+
+    // ===== Số tab 1..8 =====
+    // Nguồn sự thật là GameTabManager (owner duy nhất của clamp/persist/apply). UI chỉ đọc
+    // StateFlow của manager ⇒ không bao giờ hiển thị một con số khác con số đang chạy.
+    val tabCount: StateFlow<Int> = tabManager.tabCountState
+    val maxTabCount: Int = tabManager.maxTabCount
+    val isLowRam: Boolean = tabManager.isLowRam
+
+    private val _tabCountWarnShown = MutableStateFlow(prefs.isTabWarnShown())
+    val tabCountWarnShown: StateFlow<Boolean> = _tabCountWarnShown.asStateFlow()
 
     val isSystemRunning: StateFlow<Boolean> = tabManager.isSystemRunning
     val isMasterAutoRunning: StateFlow<Boolean> = tabManager.isSystemRunning
     val characterStatsList: StateFlow<List<CharacterStats>> = tabManager.characterStatsList
 
     init {
+        // Manager tự hạ 60 → 30 FPS khi vượt 4 tab; UI phải thấy giá trị mới, nếu không
+        // nút FPS trong sheet hiển thị sai và lần bấm kế tiếp sẽ "tăng" lên 60.
+        tabManager.onFpsChanged = { newFps -> _fps.value = newFps }
+
         // Module 5: Traffic stats loop every 2 seconds
         viewModelScope.launch(Dispatchers.Default) {
             while (true) {
@@ -188,7 +221,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         // Một cửa duy nhất cho mọi đường mở sheet, nên chặn synthetic click luôn ở đây:
         // mở sheet là một cú chạm chrome, không đi qua WebView nên lastTouchTimeMs không tự tiến.
         tabManager.markUiInteraction()
-        _controlSheetTabIndex.value = tabIndex.coerceIn(0, 3)
+        _controlSheetTabIndex.value = tabIndex.coerceIn(0, (tabManager.tabCountState.value - 1).coerceAtLeast(0))
         _isControlSheetOpen.value = true
     }
 
@@ -204,7 +237,8 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun toggleDesktopMode(tabIndex: Int) {
         val isPc = tabManager.toggleDesktopMode(tabIndex)
         val next = _desktopModeStates.value.toMutableList()
-        next[tabIndex.coerceIn(0, 3)] = isPc
+        val safeIndex = tabIndex.coerceIn(0, next.lastIndex)
+        next[safeIndex] = isPc
         _desktopModeStates.value = next
     }
 
@@ -229,6 +263,70 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun dismissAccountDialog() {
         _editingAccount.value = null
     }
+
+    // ===== Số tab =====
+
+    /**
+     * Owner duy nhất là `GameTabManager.setTabCount`. UI mirror giá trị TRẢ VỀ, không mirror
+     * giá trị yêu cầu: nếu máy RAM thấp chặn ở 4 thì nút hiển thị đúng 4 ngay.
+     */
+    fun setTabCount(requested: Int) {
+        val actual = tabManager.setTabCount(requested)
+        _selectedTabIndex.value = _selectedTabIndex.value.coerceIn(0, (actual - 1).coerceAtLeast(0))
+        _controlSheetTabIndex.value =
+            _controlSheetTabIndex.value.coerceIn(0, (actual - 1).coerceAtLeast(0))
+    }
+
+    fun markTabCountWarned() {
+        prefs.setTabWarnShown(true)
+        _tabCountWarnShown.value = true
+    }
+
+    /** Có tab nào trong [from, to) đang IN_GAME/LOGGING_IN? Dùng để hỏi trước khi giảm. */
+    fun hasBusyTabsInRange(from: Int, toExclusive: Int): Boolean {
+        val stats = characterStatsList.value
+        for (i in from until toExclusive) {
+            when (stats.getOrNull(i)?.state) {
+                com.example.model.TabLifecycleState.IN_GAME,
+                com.example.model.TabLifecycleState.LOGGING_IN -> return true
+                else -> Unit
+            }
+        }
+        return false
+    }
+
+    // ===== Tự động cập nhật: 3 cú chạm riêng biệt, không cú nào tự động hoá cú sau =====
+    // 1. kiểm tra (có thể tự chạy nền) 2. tải về 3. cài đặt. Repo không bao giờ làm 2 và 3
+    // mà không có lời gọi từ đây, và đây chỉ được gọi từ tap trong ControlSheet.
+
+    fun checkForUpdate() {
+        viewModelScope.launch { updateRepository?.checkForUpdate(manual = true) }
+    }
+
+    fun startUpdateDownload() {
+        viewModelScope.launch { updateRepository?.download() }
+    }
+
+    fun installUpdate() {
+        viewModelScope.launch { updateRepository?.install() }
+    }
+
+    fun onActivityResumed() {
+        // Kiểm lại AppOp cài đặt (không tin người dùng đã bật) + không tự cài.
+        updateRepository?.onAppResumed()
+    }
+
+    fun releasesPageUrl(): String =
+        updateRepository?.releasesPageUrl() ?: "https://github.com/gvhoang/volam-idle-manager/releases"
+
+    fun shouldShowUpdateBanner(): Boolean = updateRepository?.shouldShowBanner() ?: false
+
+    fun markUpdateBannerShown() {
+        updateRepository?.markBannerShown()
+    }
+
+    /** Thông điệp "đã cập nhật" của process trước; đọc một lần rồi xoá. */
+    fun consumeLaunchMessage(): String? = updateRepository?.consumeLaunchMessage()
 
     override fun onCleared() {
         tabManager.cleanup()

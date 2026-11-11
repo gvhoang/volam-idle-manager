@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -27,6 +29,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -45,7 +48,6 @@ import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.model.CharacterStats
-import com.example.model.NetworkDataInfo
 import com.example.model.TabLifecycleState
 import com.example.webview.GameTabManager
 
@@ -56,8 +58,11 @@ import com.example.webview.GameTabManager
 // dispatchTouchEvent trước lớp vẽ Compose, nên overlay không đảm bảo thắng touch. Là sibling
 // nghĩa là dải không bao giờ đè lên WebView ⇒ không thể ăn mất một cú chạm của game.
 //
-// Nội dung tối thiểu: có mấy tab, đang xem tab nào, tab nào còn sống.
-//   1 chấm 7dp + 1 nhãn 9.5sp, ×4, + ô ☰ + ô ⋯
+// Nội dung: có mấy tab, đang xem tab nào. 1 chấm 7dp + 1 nhãn 9.5sp, + ô ☰ + ô ⋯.
+//
+// Với N > 4 KHÔNG thể nhồi chip 44dp vào 360dp (104 + 4N + 44N > 360 từ N = 6), nên hàng
+// chip đổi sang LazyRow ghim ☰ và ⋯ ở hai đầu, chip chọn cố định 76dp. Chiều cao dải KHÔNG
+// đổi (32dp + inset) — đó là bất biến, không phải chi tiết.
 // =============================================================================
 
 private val StripBg = Color(0xFF0F172A)
@@ -73,6 +78,7 @@ private val IconTintActive = Color(0xFF34D399)
 @Composable
 fun GameStatusStrip(
     tabManager: GameTabManager,
+    tabCount: Int,
     characterStatsList: List<CharacterStats>,
     selectedTabIndex: Int,
     isDownloading: Boolean,
@@ -97,6 +103,9 @@ fun GameStatusStrip(
         fontScale = rawFontScale.coerceAtMost(1.3f)
     )
 
+    val safeCount = tabCount.coerceAtLeast(0)
+    val safeSelected = if (safeCount == 0) 0 else selectedTabIndex.coerceIn(0, safeCount - 1)
+
     Surface(
         modifier = modifier
             .fillMaxWidth()
@@ -106,152 +115,265 @@ fun GameStatusStrip(
         border = BorderStroke(1.dp, StripBorder)
     ) {
         CompositionLocalProvider(LocalDensity provides labelDensity) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(stripHeight)
-                    .padding(horizontal = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                // Ô 1: mở bảng điều khiển (drawer)
-                Box(
+            if (safeCount <= 4) {
+                // ===== NHÁNH LEGACY — NGUYÊN VĂN (N ≤ 4) =====
+                // chip đang chọn co giãn (weight 1f), các chip còn lại cố định 44dp.
+                Row(
                     modifier = Modifier
-                        .width(44.dp)
-                        .fillMaxHeight()
-                        .clickable(
-                            role = Role.Button,
-                            onClick = {
-                                tabManager.markUiInteraction()
-                                onOpenSidebar()
-                            }
-                        )
-                        .semantics { contentDescription = "Mở bảng điều khiển" }
-                        .testTag("strip_sidebar_button"),
-                    contentAlignment = Alignment.Center
+                        .fillMaxWidth()
+                        .height(stripHeight)
+                        .padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Menu,
-                        contentDescription = null,
-                        tint = IconTint,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                // 4 chip tab: chip đang chọn co giãn (weight 1f), 3 chip còn lại cố định 44dp
-                for (i in 0..3) {
-                    val stats = characterStatsList.getOrElse(i) { CharacterStats(tabIndex = i) }
-                    val isSelected = selectedTabIndex == i
-                    val shape = RoundedCornerShape(4.dp)
-                    val chipModifier = if (isSelected) {
-                        Modifier
-                            .weight(1f)
-                            .widthIn(min = 44.dp)
-                            .fillMaxHeight()
-                    } else {
-                        Modifier
+                    MenuCell(
+                        tabManager = tabManager,
+                        onOpenSidebar = onOpenSidebar,
+                        modifier = Modifier
                             .width(44.dp)
                             .fillMaxHeight()
+                    )
+
+                    for (i in 0 until safeCount) {
+                        val stats = characterStatsList.getOrElse(i) { CharacterStats(tabIndex = i) }
+                        val isSelected = safeSelected == i
+                        val chipModifier = if (isSelected) {
+                            Modifier
+                                .weight(1f)
+                                .widthIn(min = 44.dp)
+                                .fillMaxHeight()
+                        } else {
+                            Modifier
+                                .width(44.dp)
+                                .fillMaxHeight()
+                        }
+
+                        TabChip(
+                            tabIndex = i,
+                            stats = stats,
+                            isSelected = isSelected,
+                            tabManager = tabManager,
+                            onSelectTab = onSelectTab,
+                            onOpenControlSheet = onOpenControlSheet,
+                            modifier = chipModifier
+                        )
                     }
 
-                    Box(
-                        modifier = chipModifier
-                            .background(
-                                color = if (isSelected) CellSelectedFill else CellIdleFill,
-                                shape = shape
-                            )
-                            .border(
-                                width = 1.dp,
-                                color = if (isSelected) CellSelectedBorder else CellIdleBorder,
-                                shape = shape
-                            )
-                            .selectable(
-                                selected = isSelected,
-                                role = Role.Tab,
-                                onClick = {
-                                    tabManager.markUiInteraction()
-                                    // Tap chip đang chọn = mở bảng điều khiển cho tab đó
-                                    // (§4 vòng đời sheet); tap chip khác = chuyển tab.
-                                    if (isSelected) onOpenControlSheet(i) else onSelectTab(i)
-                                }
-                            )
-                            .semantics {
-                                contentDescription = "Tab ${i + 1}"
-                                stateDescription = buildString {
-                                    append(
-                                        when (stats.state) {
-                                            TabLifecycleState.IN_GAME -> "đang chơi"
-                                            TabLifecycleState.LOGGING_IN -> "đang vào game"
-                                            TabLifecycleState.IDLE -> "chờ mở"
-                                            TabLifecycleState.OFFLINE -> "đã dừng"
-                                        }
-                                    )
-                                    if (stats.characterName.isNotBlank() &&
-                                        stats.characterName != "Chưa mở tab"
-                                    ) {
-                                        append(", ")
-                                        append(stats.characterName)
-                                    }
-                                }
-                            }
-                            .testTag("strip_tab_chip_$i"),
-                        contentAlignment = Alignment.Center
+                    OverflowCell(
+                        tabManager = tabManager,
+                        selectedTabIndex = safeSelected,
+                        isDownloading = isDownloading,
+                        onOpenControlSheet = onOpenControlSheet,
+                        modifier = Modifier
+                            .width(44.dp)
+                            .fillMaxHeight()
+                    )
+                }
+            } else {
+                val listState = rememberLazyListState()
+                // Chọn tab ngoài vùng nhìn thấy phải tự cuộn tới. animateScrollToItem giữ
+                // chiều cao dải (LazyRow không có chiều cao nội tại).
+                LaunchedEffect(safeSelected, safeCount) {
+                    listState.animateScrollToItem(safeSelected)
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(stripHeight)
+                        .padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    MenuCell(
+                        tabManager = tabManager,
+                        onOpenSidebar = onOpenSidebar,
+                        modifier = Modifier
+                            .width(44.dp)
+                            .fillMaxHeight()
+                    )
+
+                    LazyRow(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight(),
+                        state = listState,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.Center,
-                            modifier = Modifier.padding(horizontal = 3.dp)
-                        ) {
-                            StatusDot(state = stats.state)
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = if (isSelected) {
-                                    "Tab ${i + 1}" + if (stats.characterName.isNotBlank() &&
-                                        stats.characterName != "Chưa mở tab"
-                                    ) {
-                                        ": ${stats.characterName}"
-                                    } else {
-                                        ""
-                                    }
-                                } else {
-                                    "T${i + 1}"
-                                },
-                                color = if (isSelected) Color.White else CellIdleText,
-                                fontSize = 9.5.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                        items(count = safeCount) { i ->
+                            val stats = characterStatsList.getOrElse(i) {
+                                CharacterStats(tabIndex = i)
+                            }
+                            val isSelected = safeSelected == i
+                            // Target ≥ 44dp (accessibility); chip chọn rộng 76dp để chứa
+                            // "Tab N: Tên" mà không phải dùng biến thể chỉ-chấm 18dp.
+                            TabChip(
+                                tabIndex = i,
+                                stats = stats,
+                                isSelected = isSelected,
+                                tabManager = tabManager,
+                                onSelectTab = onSelectTab,
+                                onOpenControlSheet = onOpenControlSheet,
+                                modifier = Modifier
+                                    .width(if (isSelected) 76.dp else 44.dp)
+                                    .fillMaxHeight()
                             )
                         }
                     }
-                }
 
-                // Ô cuối: mở bảng điều khiển nhanh. Đổi màu khi đang có lưu lượng tải về
-                // để bù cho việc chỉ số MB không còn hiện thường trực (§3 bản đồ di chuyển).
-                Box(
-                    modifier = Modifier
-                        .width(44.dp)
-                        .fillMaxHeight()
-                        .clickable(
-                            role = Role.Button,
-                            onClick = {
-                                tabManager.markUiInteraction()
-                                onOpenControlSheet(selectedTabIndex)
-                            }
-                        )
-                        .semantics { contentDescription = "Mở bảng điều khiển nhanh" }
-                        .testTag("strip_overflow_button"),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.MoreHoriz,
-                        contentDescription = null,
-                        tint = if (isDownloading) IconTintActive else IconTint,
-                        modifier = Modifier.size(18.dp)
+                    OverflowCell(
+                        tabManager = tabManager,
+                        selectedTabIndex = safeSelected,
+                        isDownloading = isDownloading,
+                        onOpenControlSheet = onOpenControlSheet,
+                        modifier = Modifier
+                            .width(44.dp)
+                            .fillMaxHeight()
                     )
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun MenuCell(
+    tabManager: GameTabManager,
+    onOpenSidebar: () -> Unit,
+    modifier: Modifier
+) {
+    Box(
+        modifier = modifier
+            .clickable(
+                role = Role.Button,
+                onClick = {
+                    tabManager.markUiInteraction()
+                    onOpenSidebar()
+                }
+            )
+            .semantics { contentDescription = "Mở bảng điều khiển" }
+            .testTag("strip_sidebar_button"),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Menu,
+            contentDescription = null,
+            tint = IconTint,
+            modifier = Modifier.size(18.dp)
+        )
+    }
+}
+
+@Composable
+private fun TabChip(
+    tabIndex: Int,
+    stats: CharacterStats,
+    isSelected: Boolean,
+    tabManager: GameTabManager,
+    onSelectTab: (Int) -> Unit,
+    onOpenControlSheet: (Int) -> Unit,
+    modifier: Modifier
+) {
+    val shape = RoundedCornerShape(4.dp)
+    Box(
+        modifier = modifier
+            .background(
+                color = if (isSelected) CellSelectedFill else CellIdleFill,
+                shape = shape
+            )
+            .border(
+                width = 1.dp,
+                color = if (isSelected) CellSelectedBorder else CellIdleBorder,
+                shape = shape
+            )
+            .selectable(
+                selected = isSelected,
+                role = Role.Tab,
+                onClick = {
+                    tabManager.markUiInteraction()
+                    // Tap chip đang chọn = mở bảng điều khiển cho tab đó
+                    // (§4 vòng đời sheet); tap chip khác = chuyển tab.
+                    if (isSelected) onOpenControlSheet(tabIndex) else onSelectTab(tabIndex)
+                }
+            )
+            .semantics {
+                contentDescription = "Tab ${tabIndex + 1}"
+                stateDescription = buildString {
+                    append(
+                        when (stats.state) {
+                            TabLifecycleState.IN_GAME -> "đang chơi"
+                            TabLifecycleState.LOGGING_IN -> "đang vào game"
+                            TabLifecycleState.IDLE -> "chờ mở"
+                            TabLifecycleState.OFFLINE -> "đã dừng"
+                        }
+                    )
+                    if (stats.characterName.isNotBlank() &&
+                        stats.characterName != "Chưa mở tab"
+                    ) {
+                        append(", ")
+                        append(stats.characterName)
+                    }
+                }
+            }
+            .testTag("strip_tab_chip_$tabIndex"),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+            modifier = Modifier.padding(horizontal = 3.dp)
+        ) {
+            StatusDot(state = stats.state)
+            Spacer(modifier = Modifier.width(3.dp))
+            Text(
+                text = if (isSelected) {
+                    "Tab ${tabIndex + 1}" + if (stats.characterName.isNotBlank() &&
+                        stats.characterName != "Chưa mở tab"
+                    ) {
+                        ": ${stats.characterName}"
+                    } else {
+                        ""
+                    }
+                } else {
+                    "T${tabIndex + 1}"
+                },
+                color = if (isSelected) Color.White else CellIdleText,
+                fontSize = 9.5.sp,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@Composable
+private fun OverflowCell(
+    tabManager: GameTabManager,
+    selectedTabIndex: Int,
+    isDownloading: Boolean,
+    onOpenControlSheet: (Int) -> Unit,
+    modifier: Modifier
+) {
+    Box(
+        modifier = modifier
+            .clickable(
+                role = Role.Button,
+                onClick = {
+                    tabManager.markUiInteraction()
+                    onOpenControlSheet(selectedTabIndex)
+                }
+            )
+            .semantics { contentDescription = "Mở bảng điều khiển nhanh" }
+            .testTag("strip_overflow_button"),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.MoreHoriz,
+            contentDescription = null,
+            tint = if (isDownloading) IconTintActive else IconTint,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 

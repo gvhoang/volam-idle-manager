@@ -1,13 +1,14 @@
 # Võ Lâm Idle Manager
 
-Chạy 4 tài khoản webgame **Võ Lâm Idle** song song trên Android: 4 WebView cách ly, tự đăng nhập, tự phục hồi khi văng, giữ kết nối 24/7 và tự động hóa việc trong game.
+Chạy **1–8 tài khoản** webgame **Võ Lâm Idle** song song trên Android: mỗi tab một WebView cách ly, tự đăng nhập, tự phục hồi khi văng, giữ kết nối 24/7, tự động hóa việc trong game và tự cập nhật từ GitHub.
 
 | Trường | Giá trị |
 |---|---|
 | Tên dự án | Võ Lâm Idle Manager |
 | Tên hiển thị (launcher) | `Võ Lâm Idle` |
-| Phiên bản | 4.0.0 |
-| `versionCode` | 4 |
+| Phiên bản | 4.1.0 |
+| `versionCode` | 5 |
+| Số tab | 1–8 (mặc định 4, khuyến nghị ≤ 4, trần cứng 8) |
 | `applicationId` | `com.aistudio.volamidle.qkrvtp` |
 | `minSdk` | 24 (Android 7.0) |
 | `targetSdk` / `compileSdk` | 36 / 36 |
@@ -46,9 +47,9 @@ Chạy 4 tài khoản webgame **Võ Lâm Idle** song song trên Android: 4 WebVi
 
 Võ Lâm Idle là một webgame idle chạy hoàn toàn trong trình duyệt. Chơi nhiều tài khoản cùng lúc theo cách thông thường nghĩa là mở nhiều tab, mỗi tab giữ một phiên WebSocket riêng, và mọi tab đều bị trình duyệt/Android tạm dừng khi chuyển ứng dụng hoặc tắt màn hình. Kết quả là nhân vật đứng yên, gói tin dồn lại, và khi quay lại thì game tua nhanh hoặc nhảy vị trí.
 
-Ứng dụng này nhúng 4 WebView ngay trong một app Android. Mỗi WebView có profile Chromium cách ly (cookie, `localStorage`, session riêng), được giữ ở trạng thái hiển thị kể cả khi app ra nền, và được tự động đăng nhập/đăng nhập lại khi bị văng phiên. Một foreground service giữ CPU và Wi-Fi thức; một lớp script bơm vào trang lo phần đăng nhập, quét trạng thái và điều khiển game.
+Ứng dụng này nhúng 1–8 WebView ngay trong một app Android, mặc định 4 và cấu hình được từ 1 đến 8. Mỗi WebView có profile Chromium cách ly (cookie, `localStorage`, session riêng), được giữ ở trạng thái hiển thị kể cả khi app ra nền, và được tự động đăng nhập/đăng nhập lại khi bị văng phiên. Một foreground service giữ CPU và Wi-Fi thức; một lớp script bơm vào trang lo phần đăng nhập, quét trạng thái và điều khiển game.
 
-Phạm vi rõ ràng: một máy chủ game duy nhất, bốn tab cố định, không có cơ chế cấu hình đa game. Đây là công cụ cá nhân, không phải sản phẩm phát hành; các giới hạn bảo mật được liệt kê đầy đủ ở [mục 15](#15-bảo-mật).
+Phạm vi rõ ràng: một máy chủ game duy nhất, số tab cấu hình được trong khoảng 1–8, không có cơ chế cấu hình đa game. Đây là công cụ cá nhân, không phải sản phẩm phát hành; các giới hạn bảo mật được liệt kê đầy đủ ở [mục 15](#15-bảo-mật).
 
 ---
 
@@ -60,7 +61,7 @@ Chỉ những mục có trong mã nguồn 4.0.0 mới được liệt kê. Các 
 
 | Tính năng | Chi tiết trong mã |
 |---|---|
-| 4 tab cố định | `GameTabManager` tạo sẵn 4 `KeepAliveWebView` ngay khi khởi động |
+| 1–8 tab cấu hình được | `GameTabManager` cấp phát mảng 8 `KeepAliveWebView` ngay khi khởi động, chỉ tạo WebView cho các ô đang bật |
 | Cách ly phiên | `WebViewCompat.setProfile(webView, "Isolated_Cluster_<id>_Tab_<index>")` khi WebView hỗ trợ `MULTI_PROFILE` |
 | Cấu hình theo tab | Tài khoản, mật khẩu (che), URL tùy chỉnh, checkbox tự động đăng nhập |
 | Kiểm tra URL | Chỉ chấp nhận `https` và host đúng `volamidle.pages.dev` hoặc subdomain; chuỗi rỗng = dùng mặc định |
@@ -74,19 +75,22 @@ Ghi chú trung thực: checkbox **“Cho phép tự động đăng nhập khi b�
 
 ### 4.2 Giao diện & bố cục
 
+Từ 4.1, toàn bộ chrome quản trị đã dồn xuống **một dải trạng thái 32dp** ở đáy và **một sheet điều khiển nhanh** bật bằng nút `⋯`. Vùng game chiếm phần còn lại của màn hình.
+
 | Tính năng | Chi tiết |
 |---|---|
-| Bố cục **4 Dọc** | 4 cột song song trong một hàng (`1x4`), mỗi tab ~1/4 chiều ngang |
-| Bố cục **Lưới 2x2** | 2 hàng × 2 cột |
-| Bố cục **1 Tab** | Một tab toàn màn hình, chuyển bằng chip `T1`–`T4` trên header và trên thanh tab |
-| Sidebar | Drawer trượt 320dp ở màn hình dọc; cột cố định 265dp ở màn hình ngang |
-| Master controls | `ĐĂNG NHẬP HẾT` mở và đăng nhập cả 4 tab; `DỪNG TẤT CẢ` dừng cả 4 tab và service |
-| Đồng bộ “Màn hình đen” | Checkbox trong sidebar bật/tắt cài đặt `Hệ thống → Hiển Thị → Màn hình đen` của game trên cả 4 tab |
-| Header | Badge lưu lượng, nút FPS, `🌙 Treo máy`, nút chuyển VIEW |
+| Dải trạng thái 32dp | `☰` mở bảng điều khiển đầy đủ · chip tab đang chọn · `T2` `T3` … · `⋯` mở sheet nhanh. Là **sibling** của `AndroidView`, không phải lớp phủ, nên không ăn chạm vào game |
+| Chip tab cuộn ngang | Từ 5 tab trở lên dải chuyển sang `LazyRow`: `☰` và `⋯` ghim hai đầu, chip đang chọn cố định 76dp, các chip còn lại cuộn. Chiều cao dải không đổi |
+| Bố cục **4 Dọc** | `cols = min(số tab, 4)`; quá 4 tab thì tự xuống hàng, ô giữ nguyên 1/4 chiều ngang và hàng cuối căn trái. Ở 1–4 tab dùng đúng nhánh bố cục cũ, không lệch một pixel |
+| Bố cục **Lưới 2x2** | 2 cột × `ceil(N/2)` hàng |
+| Bố cục **1 Tab** | Một tab toàn màn hình, chuyển bằng chip trên dải trạng thái |
+| Sheet điều khiển nhanh | 9 hàng, mở bằng `⋯` hoặc nút trong dải: mở/PC/tải lại/dừng tab · 3 chế độ xem · **số tab 1–8** · FPS + Treo máy · lưu lượng + reset · đồng bộ auto · 🤖 Tự động · bảng điều khiển · phiên bản + cập nhật |
+| Bảng điều khiển đầy đủ | `☰` mở drawer: tài khoản, master controls `ĐĂNG NHẬP HẾT` / `DỪNG TẤT CẢ`, đồng bộ “Màn hình đen” |
 | Treo máy | Overlay đen OLED, hạ độ sáng cửa sổ xuống `0.01`, chạm đúp để mở khóa |
 | Giữ màn hình sáng | `FLAG_KEEP_SCREEN_ON` được bật trong `MainActivity` |
 | Viewport cho cột hẹp | Chèn CSS: tắt `backdrop-filter`, đặt `min-width` cho input, `width:100%` dưới 280px |
 | Không nháy khi đổi bố cục | Chỉ tháo/gắn lại view khi layout hoặc tab được chọn thay đổi |
+| Chạm vào chrome không phá đăng nhập | Mỗi lần chạm nút chrome gọi `markUiInteraction()`, đẩy mốc chạm của **mọi** tab lên hiện tại; vòng bơm script 850ms bỏ qua tab vừa có chạm trong 5s |
 
 ### 4.3 Tự động đăng nhập
 
@@ -160,6 +164,38 @@ Android 13+ khai báo `POST_NOTIFICATIONS` nhưng app **không xin quyền runti
 | Lỗi tải trang | Tối đa 3 lần, giãn cách 2.5s → 5s → 7.5s; `ERROR_HOST_LOOKUP` dừng ngay; hủy hẹn giờ cũ trước khi đặt lần mới |
 | Không báo sai thành công | `onPageFinished` không ghi “Trang đã sẵn sàng” khi đang ở trang lỗi của Chromium |
 | Tự đăng nhập lại | Khi watchdog thấy màn hình đăng nhập hoặc mất phiên, tab về `LOGGING_IN` và được đăng nhập lại |
+| Chống kẹt nhận diện | Ô chat trong game bị loại khỏi danh sách “ô nhập của form đăng nhập”, nên gõ chat không còn bị hiểu là đang ở màn hình login |
+
+### 4.8 Số cửa sổ game (1–8)
+
+| Mục | Giá trị |
+|---|---|
+| Khoảng hợp lệ | `TabLimits.MIN = 1` … `TabLimits.HARD_MAX = 8`; máy `isLowRamDevice` bị chặn ở 4 |
+| Mặc định | 4 |
+| Khuyến nghị | ≤ 4 (`RECOMMENDED_MAX`); trên ngưỡng này app hỏi lại một lần trước khi tăng |
+| Cấp phát | Mảng `slots`/`webViews` cấp phát một lần cho 8 ô và **không bao giờ cấp phát lại**; tăng/giảm tab chỉ bật/tắt ô |
+| Giảm tab | Nếu có tab đang chạy trong khoảng bị cắt, app hỏi xác nhận vì tab đó sẽ mất phiên và phải đăng nhập lại |
+| Bố cục | `TabLayoutPlan.planFor(mode, n)` là hàm thuần, có unit test (`TabLayoutPlanTest`) |
+| Giới hạn thật | Mỗi tab là một tiến trình Chromium riêng: ~250–320 MB RSS khi đã vào game. 8 tab ≈ 2,4 GB. Máy thiếu RAM sẽ bị Android thu hồi renderer và tab đó phải đăng nhập lại |
+| Tự hạ FPS | Vượt 4 tab, app tự hạ 60 → 30 FPS (một lần, có toast) vì chu kỳ 33ms thay vì 16ms giảm khoảng một nửa công JS mỗi tab |
+| Tự mở tab mới | Nếu hệ thống đang chạy, các tab vừa tăng được mở và đăng nhập tự động, giãn cách 800ms |
+| Bấm nhanh liên tiếp | Teardown chạy trên main thread sau khi đã cập nhật `tabCount`, và chỉ tháo slot thật sự nằm ngoài số tab hiện tại — tránh xóa đúng WebView vừa bật lại khi người dùng bấm 8 → 5 → 7
+
+Số tab lưu trong `SharedPreferences` (khóa `pref_tab_count`) và áp dụng ngay, không cần khởi động lại app.
+
+### 4.9 Tự động cập nhật từ GitHub
+
+| Hạng mục | Chi tiết |
+|---|---|
+| Nguồn | `api.github.com/repos/gvhoang/volam-idle-manager/releases/latest`, gọi không cần token |
+| So sánh | `versionCode` của release so với `BuildConfig.VERSION_CODE`. `versionCode` đọc từ **body release** (dòng `versionCode: N`, khớp `version[\s-]?code` rồi tới số đầu tiên) trước, chỉ suy từ tag khi body không khai báo |
+| Tự kiểm tra | Mỗi 12 giờ, có jitter, dùng `ETag`/`If-None-Match`; kết quả `304` không tính là lỗi |
+| Tự tải | **TẮT** mặc định — người dùng bấm `Tải bản mới` trong sheet |
+| Tự cài | **KHÔNG BAO GIỜ** — mỗi lần cài cần một cú chạm mở `PackageInstaller` và một hộp thoại xác nhận của hệ thống |
+| Kiểm tra trước khi cài | `getPackageArchiveInfo`: đúng `applicationId`, `versionCode` **lớn hơn** bản đang chạy, signer trùng với app đang cài |
+| Toàn vẹn file | So `assets[].digest` (SHA-256) của GitHub với file tải về. Đây là **kiểm tra toàn vẹn**, không phải ranh giới bảo mật — xem [mục 15](#15-bảo-mật) |
+| Giới hạn redirect | `followRedirects(false)`; mỗi hop phải HTTPS, host khớp chính xác một trong `api.github.com`, `github.com`, `release-assets.githubusercontent.com`, `objects.githubusercontent.com`, port 443, tối đa 3 hop |
+| Quyền | `REQUEST_INSTALL_PACKAGES`; receiver của `PendingIntent` là `exported=false`, không dùng `FileProvider` |
 
 ---
 
@@ -264,7 +300,7 @@ MainViewModel (AndroidViewModel)
 ### 6.1 Luồng đăng nhập
 
 1. Người dùng bấm **ĐĂNG NHẬP HẾT** → `MainViewModel.onMasterLoginAllClicked()` → `GameTabManager.loginAll()`.
-2. `isSystemRunning = true`, `KeepAliveService` được start, vòng lặp đi qua 4 tab: đặt `LOGGING_IN`, chọn URL (custom hoặc mặc định), gọi `loadUrl`, nghỉ 800ms giữa các tab.
+2. `isSystemRunning = true`, `KeepAliveService` được start, vòng lặp đi qua `0 until tabCount`: đặt `LOGGING_IN`, chọn URL (custom hoặc mặc định), gọi `loadUrl`, nghỉ 800ms giữa các tab.
 3. `onPageFinished` bơm script giới hạn FPS và script viewport, sau đó bơm `buildAutoLoginStepScript` nếu tab đang active.
 4. Script xử lý theo thứ tự: hộp thoại tranh chấp phiên → form đăng nhập → chọn nhân vật → “Bắt Đầu Trò Chơi” → kiểm tra HUD trận đấu.
 5. Khi thấy HUD (`Hành trang` + `Kỹ năng`/`Võ công`/`Hệ thống` hoặc `Chế độ:`), script gọi `AndroidBridge.onInGameDetected(tabIdx)`.
@@ -301,12 +337,14 @@ MainViewModel (AndroidViewModel)
 
 ```
 app/src/main/java/com/example/
-├── MainActivity.kt                     Activity chính; dựng header, sidebar, workspace, dialog
+├── VolamIdleApp.kt                     Application; dựng UpdateRepository và vòng kiểm tra 12h (có jitter)
+├── MainActivity.kt                     Activity chính; dải trạng thái + vùng game + sheet/drawer
 ├── KeepAliveService.kt                 Foreground service, PARTIAL_WAKE_LOCK, WifiLock, notification
 ├── data/
-│   └── PreferencesManager.kt           Tài khoản, cấu hình auto, FPS, cụm, offset lưu lượng, validate URL
+│   └── PreferencesManager.kt           Tài khoản, cấu hình auto, FPS, số tab, offset lưu lượng, validate URL
 ├── model/
-│   └── GameState.kt                    AccountConfig, CharacterStats, NetworkDataInfo, enum trạng thái/bố cục
+│   ├── GameState.kt                    AccountConfig, CharacterStats, NetworkDataInfo, enum trạng thái/bố cục
+│   └── TabLimits.kt                    MIN=1, DEFAULT=4, RECOMMENDED_MAX=4, HARD_MAX=8, SLOT_COUNT=8, clamp()
 ├── network/
 │   └── TrafficMonitor.kt               Đọc TrafficStats theo UID, tính tổng và tốc độ
 ├── ui/
@@ -314,13 +352,29 @@ app/src/main/java/com/example/
 │   └── components/
 │       ├── AccountDialog.kt             Hộp thoại tài khoản: user, pass, URL, checkbox, validate URL
 │       ├── AutoConfigDialog.kt          Hộp thoại 🤖: 13 checkbox + 4 ô số + nút đặt lại bộ đếm
-│       ├── GameWebViewContainer.kt      Dựng 4 ô game, 3 bố cục, mini header từng tab, idle overlay
-│       ├── HeaderBar.kt                 Lưu lượng, FPS, treo máy, chuyển VIEW, chip T1–T4
+│       ├── ControlSheet.kt              Sheet điều khiển nhanh 9 hàng + stepper số tab + hàng cập nhật
+│       ├── GameStatusStrip.kt           Dải trạng thái 32dp: ☰, chip tab, ⋯; LazyRow khi > 4 tab
+│       ├── GameWebViewContainer.kt      Dựng N ô game theo TabLayoutPlan, idle overlay, registerSlot
+│       ├── HeaderBar.kt                 Thanh lưu lượng/FPS dùng trong drawer (hiện không được gọi)
 │       ├── OledBlackScreen.kt           Overlay đen + đồng hồ + chạm đúp mở khóa
-│       └── SidebarView.kt               Nút master, 4 thẻ tab, thông số, đồng bộ chế độ, màn hình đen, 🤖
+│       ├── SidebarView.kt               Nút master, N thẻ tab, thông số, màn hình đen
+│       └── TabLayoutPlan.kt             planFor(mode, n) → cols/rows/useLegacyRow; hàm thuần, có test
 ├── ui/theme/                            Color.kt, Theme.kt, Type.kt — theme Material 3 tối
+├── update/
+│   ├── UpdateChecker.kt                 Gọi /releases/latest, đọc tag/body/assets, ETag
+│   ├── VersionRules.kt                  Suy versionCode từ body hoặc tag
+│   ├── HttpHops.kt                      HTTP client + allowlist host cho từng hop redirect
+│   ├── UpdateDownloader.kt              Tải APK, đối chiếu SHA-256 với digest của release
+│   ├── ApkInspector.kt                  getPackageArchiveInfo: package, versionCode, signer
+│   ├── ApkInstaller.kt                  PackageInstaller session + PendingIntent USER_ACTION_REQUIRED
+│   ├── InstallResultReceiver.kt         Nhận kết quả cài, map mã lỗi sang thông báo tiếng Việt
+│   ├── PackageReplacedReceiver.kt       Chạy lại sau khi app được thay thế
+│   ├── UpdateRepository.kt              Điều phối state machine kiểm tra → tải → cài
+│   ├── UpdateState.kt                   Sealed state cho UI
+│   ├── AppVisibility.kt                 Theo dõi app đang foreground
+│   └── ByteSize.kt                      Định dạng dung lượng
 └── webview/
-    ├── GameTabManager.kt                Vòng đời 4 WebView, login, watchdog, GC, phục hồi renderer, bridge
+    ├── GameTabManager.kt                Vòng đời N WebView, login, watchdog, GC, phục hồi renderer, bridge
     ├── GameScriptInjector.kt            8 builder sinh JavaScript bơm vào trang game
     └── GameAutoPilot.kt                 AutoConfig (18 trường) + engine giữ script #vlmAuto
 ```
@@ -330,7 +384,8 @@ Tài nguyên và test:
 ```
 app/src/main/res/values/                 strings.xml (app_name), colors.xml, themes.xml
 app/src/main/res/xml/                    backup_rules.xml, data_extraction_rules.xml
-app/src/test/java/com/example/           ExampleUnitTest.kt (7 test), ExampleRobolectricTest.kt (1 test)
+app/src/test/java/com/example/           ExampleUnitTest.kt (7), ExampleRobolectricTest.kt (1),
+                                         TabLayoutPlanTest.kt (7), UpdateRulesTest.kt (8)
 app/src/androidTest/java/com/example/    ExampleInstrumentedTest.kt (kiểm tra applicationId)
 ```
 
@@ -341,11 +396,11 @@ app/src/androidTest/java/com/example/    ExampleInstrumentedTest.kt (kiểm tra 
 | Hạng mục | Yêu cầu |
 |---|---|
 | Android | 7.0 (API 24) trở lên; `targetSdk` 36 |
-| WebView | Bản Chromium hỗ trợ `WebViewFeature.MULTI_PROFILE`. Không hỗ trợ thì app vẫn chạy nhưng 4 tab dùng chung profile mặc định — mất cách ly cookie/session |
-| RAM | Thực tế cần cho 4 renderer game cùng lúc; đo trên LDPlayer Android 14: PSS của app ~222 MB, ổn định sau 3 phút. Thiết bị ít RAM dễ bị hệ điều hành thu hồi renderer; khuyến nghị 6–8 GB |
+| WebView | Bản Chromium hỗ trợ `WebViewFeature.MULTI_PROFILE`. Không hỗ trợ thì app vẫn chạy nhưng mọi tab dùng chung profile mặc định — mất cách ly cookie/session |
+| RAM | 4 tab cần ~1,0–1,3 GB cho riêng app + renderer; 8 tab đo được ~1,9 GB. Khuyến nghị 6–8 GB. Thiết bị ít RAM dễ bị hệ điều hành thu hồi renderer |
 | Mạng | Wi-Fi hoặc 4G ổn định; app giữ WifiLock nhưng không đảm bảo mạng của nhà mạng |
 | Bộ nhớ trong | APK debug + dữ liệu WebView; không có yêu cầu đặc biệt |
-| Quyền | Chỉ 7 quyền khai báo: `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, `WAKE_LOCK`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `POST_NOTIFICATIONS` |
+| Quyền | 8 quyền khai báo: `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, `WAKE_LOCK`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `POST_NOTIFICATIONS`, `REQUEST_INSTALL_PACKAGES` |
 | Tối ưu pin | Cần tắt tối ưu pin / bật “Không giới hạn” cho app, nếu không OEM sẽ giết foreground service |
 
 App bật `android:largeHeap="true"`, nhưng đây chỉ là gợi ý cho bộ nhớ heap của Java/Kotlin, không tăng RAM cho 4 tiến trình renderer.
@@ -374,7 +429,7 @@ adb install -r app-debug.apk
 # hoặc mở trực tiếp file APK trên điện thoại và cho phép "Cài từ nguồn không xác định"
 ```
 
-4. Mở app. Lần đầu chạy, 4 tab ở trạng thái `⚪ Chờ mở (Idle)`.
+4. Mở app. Lần đầu chạy, các tab đang bật ở trạng thái `⚪ Chờ mở (Idle)`.
 
 ### 9.2 Lần chạy đầu
 
@@ -387,9 +442,9 @@ adb install -r app-debug.apk
 
 ## 10. Hướng dẫn sử dụng
 
-### 10.1 Cấu hình 4 tài khoản
+### 10.1 Cấu hình tài khoản cho từng tab
 
-1. Mở sidebar (nút ☰ ở góc trái header trên màn hình dọc).
+1. Mở bảng điều khiển bằng `☰` ở góc trái **dải trạng thái đáy**.
 2. Với mỗi tab, bấm `🔑 TK (Đổi)`.
 3. Nhập **Tài khoản**, **Mật khẩu**. Ô **URL Tùy chỉnh** để trống nếu dùng `https://volamidle.pages.dev`.
 4. Nếu nhập URL, chỉ chấp nhận `https://` trên `volamidle.pages.dev` hoặc subdomain. URL sai hiện dòng đỏ “Chỉ chấp nhận HTTPS trên volamidle.pages.dev”.
@@ -397,32 +452,38 @@ adb install -r app-debug.apk
 
 ### 10.2 Đăng nhập
 
-1. Bấm **▶ ĐĂNG NHẬP HẾT** để mở cả 4 tab, hoặc `▶ Mở` trên từng ô để mở riêng.
+1. Bấm **▶ ĐĂNG NHẬP HẾT** trong bảng điều khiển để mở và đăng nhập **mọi** tab đang bật, hoặc `▶ Mở` trên từng ô (hoặc trong sheet nhanh, áp cho tab đang chọn) để mở riêng.
 2. Theo dõi trạng thái: `🟡 Đang vào` → `🟢 Online`.
 3. Dòng trạng thái dưới mỗi thẻ cho biết app đang làm gì: “Đang tải trang…”, “Đã ấn [Xác Định]…”, “⚡ Đã tự bấm [Chơi ở đây]…”, “🟢 Đang chạy ổn định”.
-4. Dừng toàn bộ bằng **⏹ DỪNG TẤT CẢ**; dừng riêng bằng `⏹` trên ô game.
+4. Dừng toàn bộ bằng **⏹ DỪNG TẤT CẢ**; dừng riêng tab đang chọn bằng nút `⏹` trong sheet nhanh.
 
 ### 10.3 Chọn bố cục
 
-1. Bấm nút **VIEW** trên header để xoay vòng, hoặc bấm mũi tên `▼` để chọn trực tiếp:
-   - `⊞ 4 Cột Dọc (1x4)`
-   - `⊞ Lưới 2x2 (4 Ngang)`
-   - `🔲 1 Tab (Toàn màn hình)`
-2. Ở chế độ 1 Tab, dùng chip `T1`–`T4` trên header hoặc thanh tab phía trên vùng game.
-3. Đổi bố cục sẽ gọi `adjustAllViewports()` để chèn lại CSS cho cột hẹp, không reload trang.
+1. Mở sheet nhanh bằng `⋯` ở góc phải dải trạng thái.
+2. Hàng thứ hai của sheet là 3 chế độ: `⊞ 4 Dọc`, `⊞ 2x2`, `🔲 1 Tab`.
+3. Ở chế độ 1 Tab, chuyển giữa các tab bằng chip trên dải trạng thái đáy.
+4. Đổi bố cục sẽ gọi `adjustAllViewports()` để chèn lại CSS cho cột hẹp, không reload trang.
 
-### 10.4 Đồng bộ chế độ
+### 10.4 Đổi số cửa sổ game
 
-1. Trong sidebar, mục **ĐỒNG BỘ AUTO CẢ 4 TAB**.
+1. Mở sheet nhanh bằng `⋯`.
+2. Hàng **SỐ TAB** có `−` và `+` quanh con số hiện tại, giới hạn 1–8.
+3. Tăng vượt 4 lần đầu sẽ hiện hộp xác nhận về RAM/CPU; bấm **Tiếp tục** để áp dụng.
+4. Giảm xuống dưới một tab đang chạy sẽ hiện hộp xác nhận vì tab đó mất phiên và phải đăng nhập lại.
+5. Trên máy báo `isLowRamDevice`, trần bị hạ xuống **4**: nút `+` dừng ở 4 vì quá 4 renderer là OOM. Giá trị 8 do máy khác để lại cũng bị kẹp về 4 khi đọc.
+
+### 10.5 Đồng bộ chế độ
+
+1. Trong sheet nhanh, mục **ĐỒNG BỘ AUTO CẢ N TAB** — nhãn tự đổi theo số tab đang bật.
 2. Chọn `📜 Nhiệm Vụ`, `⚔️ Phó Bản` hoặc `🔥 Luyện Công`.
 3. Script tìm `<select>` của game, đặt `selectedIndex`, bắn `input`/`change`; nếu game dùng nút thay vì select, script bấm nút tương ứng và tránh thanh menu đáy.
 4. Kết quả hiện ở dòng trạng thái: `⚡ Chế độ: Phó Bản`.
 
-Ngay dưới hàng nút đồng bộ là checkbox **Màn hình đen**: bật/tắt cài đặt `Hệ thống → Hiển Thị → Màn hình đen` của game trên cả 4 tab. Dòng phụ hiển thị `🟢 Đang bật (4 Tab)` hoặc `⚙️ Hệ thống ➔ Hiển Thị`.
+Trong bảng điều khiển đầy đủ vẫn còn checkbox **Màn hình đen**: bật/tắt cài đặt `Hệ thống → Hiển Thị → Màn hình đen` của game trên mọi tab. Dòng phụ hiển thị `🟢 Đang bật (N Tab)` hoặc `⚙️ Hệ thống ➔ Hiển Thị`.
 
-### 10.5 Bật tự động trong game
+### 10.6 Bật tự động trong game
 
-1. Bấm **🤖 Tự động** (nút hổ phách = đang tắt, xanh = đang bật).
+1. Bấm **🤖 Tự động** trong sheet nhanh (nút hổ phách = đang tắt, xanh = đang bật).
 2. Bật công tắc **Bật tự động**.
 3. Chọn các nhóm muốn dùng. Mặc định bật các mục miễn phí; các khoản mua bằng KNB thường mặc định tắt/0, riêng `ldtMua` mặc định bật.
 4. Bấm **Lưu**. Cấu hình được đẩy xuống các tab đang mở ngay, không chờ nhịp 30 giây.
@@ -431,15 +492,23 @@ Ngay dưới hàng nút đồng bộ là checkbox **Màn hình đen**: bật/t�
 
 Nút **Đặt lại bộ đếm** xóa hạn mức ngày trong `localStorage` của các tab đang mở. Dùng khi bộ đếm cục bộ lệch với bộ đếm của game.
 
-### 10.6 Chế độ treo máy
+### 10.7 Chế độ treo máy
 
-1. Bấm **🌙 Treo máy** trên header.
+1. Bấm **🌙 Treo máy** trong sheet nhanh.
 2. Màn hình chuyển sang overlay đen, độ sáng cửa sổ còn `0.01`, đồng hồ vẫn chạy.
 3. Chạm đúp để mở khóa. App vẫn giữ `FLAG_KEEP_SCREEN_ON` và service trong suốt thời gian này.
 
-### 10.7 Đổi FPS
+### 10.8 Đổi FPS
 
-Bấm nút `⚡ 60FPS` / `⚡ 30FPS` trên header. Giá trị được lưu vào `pref_fps` và áp ngay cho cả 4 tab. 30 FPS giảm tải GPU/CPU đáng kể khi chạy 4 renderer.
+Bấm nút `⚡ 60FPS` / `⚡ 30FPS` trong sheet nhanh. Giá trị được lưu vào `pref_fps` và áp ngay cho mọi tab. 30 FPS giảm tải GPU/CPU đáng kể khi chạy nhiều renderer.
+
+### 10.9 Cập nhật app
+
+1. Hàng cuối sheet nhanh hiển thị `📦 Phiên bản: x.y.z` kèm trạng thái cập nhật.
+2. Bấm **Kiểm tra cập nhật**. App gọi `api.github.com` và báo `Đã là bản mới nhất` hoặc số phiên bản mới.
+3. Có bản mới → **Tải bản mới** → thanh tiến trình → **Cài đặt**.
+4. Android hiện hộp thoại xác nhận của hệ thống. Chấp nhận để cài đè; tài khoản đã lưu **giữ nguyên** vì dữ liệu nằm trong `SharedPreferences` của app, không bị xóa khi cập nhật.
+5. Từ chối quyền “Cài ứng dụng không rõ nguồn gốc” sẽ khiến bước cài thất bại — app đưa nút mở thẳng màn hình cài đặt đó.
 
 ---
 
@@ -517,7 +586,10 @@ Cách xử lý: clone/build trong thư mục ASCII tuyệt đối, ví dụ `C:\
 
 ## 12. Kiểm thử
 
-8 unit test trong `app/src/test/`. Đây là test kiểm tra sự hiện diện của chuỗi/khối logic trong JavaScript do Kotlin sinh ra, **không chạy JavaScript thật**.
+23 unit test trong `app/src/test/`. Hai nhóm:
+
+- **Kiểm tra sự hiện diện** (`ExampleUnitTest`, `ExampleRobolectricTest`): soi chuỗi/khối logic trong JavaScript do Kotlin sinh ra. **Không chạy JavaScript thật.**
+- **Kiểm tra hành vi** (`TabLayoutPlanTest`, `UpdateRulesTest`): gọi hàm thuần của Kotlin và so kết quả, nên là test thật.
 
 | Test | Nội dung |
 |---|---|
@@ -529,6 +601,8 @@ Cách xử lý: clone/build trong thư mục ASCII tuyệt đối, ví dụ `C:\
 | `ExampleUnitTest.testBackgroundKeepAliveAndAntiJitterScript` | Script FPS chứa `visibilityState`, `__isAppInBackground`, `safeDelta`, `initSilentKeepAliveAudio` |
 | `ExampleUnitTest.testNewLoginUiScript` | Script login có `function isVisible(el)`, không dùng regex `(hidden\|d-none`, hỗ trợ “bat dau tro choi”, “mat ma”, bỏ qua “hien mat”, tích “nho tai khoan”, bấm “xac dinh”, có `findLoginSubmitButton` |
 | `ExampleRobolectricTest.read string from context` | `R.string.app_name == "Võ Lâm Idle"` với Robolectric `sdk = 36` |
+| `TabLayoutPlanTest` (7) | `n ≤ 4` dùng nhánh bố cục cũ (`useLegacyRow = true`); `n = 5..8` ra `cols = 4`, `rows = 2`; lưới 2x2 ra `cols = 2`; 1 Tab luôn `cols = 1, rows = 1`; biên `MIN`/`HARD_MAX` không vượt trần |
+| `UpdateRulesTest` (8) | Suy `versionCode` từ tag `v4.0.0` → 40000; body `versionCode: 4` thắng tag; body rác/tag lạ trả `null`; allowlist host chấp nhận đúng 4 host GitHub và từ chối host lạ/HTTP/port khác |
 
 Chạy:
 
@@ -545,7 +619,7 @@ Có thêm 1 instrumented test (`ExampleInstrumentedTest`) kiểm tra `applicatio
 
 | Triệu chứng | Nguyên nhân | Cách xử lý |
 |---|---|---|
-| Chỉ 1 tab Online, 3 tab kẹt “Đang vào” | Lỗi lịch sử: script xác định “đã vào game” dựa trên việc không còn ô nhập, nhưng màn hình game có ô chat → `onInGameDetected` không bao giờ được gọi; watchdog chỉ quét tab `IN_GAME` nên các tab kẹt không bao giờ được cứu | Đã sửa trong 4.0: ưu tiên HUD trận đấu, loại ô chat khỏi danh sách ô nhập. Kiểm tra đang chạy đúng 4.0.0; xem dòng trạng thái từng tab; thử `↻` hoặc `▶ Mở` |
+| Chỉ 1 tab Online, 3 tab kẹt “Đang vào” | Lỗi lịch sử: script xác định “đã vào game” dựa trên việc không còn ô nhập, nhưng màn hình game có ô chat → `onInGameDetected` không bao giờ được gọi; watchdog chỉ quét tab `IN_GAME` nên các tab kẹt không bao giờ được cứu | Đã sửa trong 4.0: ưu tiên HUD trận đấu, loại ô chat khỏi danh sách ô nhập. Kiểm tra đang chạy đúng 4.1.0; xem dòng trạng thái từng tab; thử `↻` hoặc `▶ Mở` |
 | Không mở/chọn được dropdown trong game | Vòng lặp đăng nhập 850ms bắn click ra ngoài làm đóng `<select>` đang mở | Đã sửa: vòng lặp có touch-guard 5 giây và chỉ chạy khi tab `LOGGING_IN`. Nếu vẫn gặp, chờ 5 giây không chạm; kiểm tra tab có kẹt `LOGGING_IN` không |
 | Tab hiện “Đang kết nối lại máy chủ…” mãi | Bản cũ thử lại vô hạn khi lỗi main-frame | 4.0 giới hạn 3 lần (2.5s → 5s → 7.5s). Sau 3 lần, tab báo “❌ Máy chủ không phản hồi…”. Kiểm tra mạng/DNS và URL; `ERROR_HOST_LOOKUP` dừng ngay |
 | Test báo `ClassNotFoundException` cho mọi class | Đường dẫn project có ký tự có dấu; JVM đọc `@argfile` bằng ANSI | Build tại đường dẫn ASCII, ví dụ `C:\v4rel` |
@@ -557,7 +631,10 @@ Có thêm 1 instrumented test (`ExampleInstrumentedTest`) kiểm tra `applicatio
 | Treo máy không mở khóa được | Overlay chỉ nhận chạm đúp | Chạm đúp 2 lần liên tiếp; hoặc bấm Back (Back cũng thoát sleep mode) |
 | Tự động không làm gì | `on = false`; game < 990; chưa vào game đủ 30 giây; đang trong phó bản/tháp/truy sát/đã chết; tab chưa `IN_GAME` | Bật công tắc tổng, kiểm tra dòng trạng thái có log `🤖`; chờ ngoài phó bản; kiểm tra phiên bản game |
 | Mua KNB nhưng không nhận được | Không đọc được bộ đếm/trạng thái ví của game; giao dịch chưa xác nhận | Xem log “Kỳ Trân Các: đã bấm mua nhưng không nhận được KNB”; đặt `knbMua = 0` và kiểm tra thủ công |
-| 4 tab quá nóng / tụt pin | 4 renderer game cùng chạy | Giảm FPS xuống 30; dừng bớt tab bằng `⏹`; kiểm tra không có app khác chiếm GPU |
+| Máy quá nóng / tụt pin | Nhiều renderer game cùng chạy | Giảm số tab về 4 hoặc ít hơn; giảm FPS xuống 30; dừng bớt tab bằng `⏹`; kiểm tra không có app khác chiếm GPU |
+| Tăng lên 6–8 tab rồi một vài tab tự đăng nhập lại | Android thu hồi renderer vì thiếu RAM; app bắt `onRenderProcessGone`, tạo lại WebView cho đúng ô | Giảm số tab; đóng app khác; tăng RAM máy ảo/thiết bị. Đây là hành vi đúng, không phải crash |
+| Bấm cập nhật nhưng không cài được | Chưa cấp quyền “Cài ứng dụng không rõ nguồn gốc”, hoặc APK tải về có signer khác app đang cài | Cấp quyền trong Cài đặt; nếu signer khác, phải gỡ bản cũ rồi cài tay một lần — Android không cho vượt qua bước này |
+| Báo “Đã là bản mới nhất” dù GitHub có bản mới | Body release mới không khai báo `versionCode`, và tag không suy được số | Thêm dòng `versionCode: N` vào body release; `N` phải lớn hơn `BuildConfig.VERSION_CODE` |
 
 ---
 
@@ -572,6 +649,22 @@ Số đo A/B trên LDPlayer Android 14, 4 tài khoản thật, cùng thiết b�
 | RAM PSS của app | — | ~222 MB, ổn định sau 3 phút |
 
 Cách đọc con số: mức CPU gần như không đổi, nhưng cùng chi phí đó nuôi được 4 tab thay vì 1–2 tab. Phần lớn tải đến từ 4 tiến trình renderer của Chromium đang vẽ game, không phải từ Kotlin/Compose. Muốn giảm thêm đáng kể chỉ có ba cách thực chất: giảm số tab, hạ FPS xuống 30, hoặc giảm tần suất watchdog/GC.
+
+### 14.1 Số đo ở 8 tab
+
+Cùng máy (LDPlayer 14, Android 14 x86_64, VM 4 nhân / 6 GB), 8 tab đã vào game, đo bằng jiffies `/proc` trong 30 giây:
+
+| Chỉ số | Giá trị |
+|---|---|
+| Tiến trình app | 100,3 % một nhân |
+| 8 tiến trình renderer | 12,4 – 30,3 % một nhân, tổng ~119 % |
+| Tổng | ~220 % một nhân (~55 % của VM 4 nhân) |
+| RSS tiến trình app | 271 MB |
+| RSS mỗi renderer | 166 – 291 MB |
+| Tổng RSS | ~1,9 GB |
+| Số tiến trình renderer | 8 — đúng bằng số tab |
+
+Chi phí gần như tuyến tính theo số tab: mỗi renderer đã vào game giữ 170–290 MB. Đây là lý do `RECOMMENDED_MAX = 4` và vì sao hộp xác nhận hiện ra khi vượt mốc đó.
 
 Các thay đổi tạo ra kết quả này:
 
@@ -588,7 +681,7 @@ Các thay đổi tạo ra kết quả này:
 
 ## 15. Bảo mật
 
-Bản 4.0.0 **chưa được hardened**. Bảng dưới là các vấn đề đã xác nhận trong mã hiện tại, không phải giả định.
+Bản 4.1.0 **chưa được hardened**. Bảng dưới là các vấn đề đã xác nhận trong mã hiện tại, không phải giả định.
 
 | Mức | Vấn đề | Hệ quả |
 |---|---|---|
@@ -619,6 +712,17 @@ Thứ tự ưu tiên:
 8. Xóa dependency không dùng khỏi `app/build.gradle.kts`.
 9. Thêm `network_security_config` nếu cần giới hạn CA.
 10. Không dùng app trên thiết bị dùng chung hoặc thiết bị đã root.
+11. Tạo **release keystore**, backup hai nơi offline, rồi cắt bản release kế tiếp bằng khóa đó. Mất file ⇒ không bản nào tự cập nhật được nữa; lộ file ⇒ kẻ khác ký được APK mà Android **sẽ** chấp nhận làm bản cập nhật. Bản ký release-key đầu tiên không thể cài đè lên bản ký debug — đó là migration một lần, có chủ ý.
+
+### 15.2 Bề mặt mới do tính năng tự cập nhật
+
+| Hạng mục | Đánh giá |
+|---|---|
+| `REQUEST_INSTALL_PACKAGES` | Cho phép app mở phiên cài đặt. Không cho phép cài ngầm: mỗi lần vẫn cần người dùng chạm và hộp thoại hệ thống |
+| Ranh giới thật | **Chữ ký APK**, do Android so signer set với app đang cài. Lệch ⇒ `INSTALL_FAILED_UPDATE_INCOMPATIBLE`; không app nào vượt được |
+| `assets[].digest` (SHA-256) | Cùng nguồn với file APK. Bắt được hỏng hóc (CDN cắt cụt, proxy lỗi, lỗi lưu trữ), **không** bắt được kẻ sửa release — kẻ đó sửa cả hai. Là kiểm tra toàn vẹn, **không phải** ranh giới bảo mật |
+| Điều kiện để thành ranh giới thật | Ký digest ngoài luồng (minisign/GPG) với public key nhúng trong app — nâng cấp thật, chưa đáng khi APK còn ký debug key |
+| Commit keystore | `*.jks` / `*.keystore` phải nằm trong `.gitignore`. Nếu bị commit, cả kênh cập nhật thành giả mạo được và kiểm tra chữ ký lặng lẽ mất giá trị |
 
 ---
 
@@ -631,6 +735,7 @@ Thứ tự ưu tiên:
 | **3.0.0** | Nhánh `v3`: gỡ VPN, giữ chọn Cụm, thêm bước đầu tự động hóa trong game. Gói build ghi `versionName "1.0"` / `versionCode 1` (lỗi đánh số) |
 | **3.0.1** | Gỡ bộ chọn Cụm; hardening WebView: từ chối lỗi TLS, chặn mixed content, giới hạn điều hướng top-level, thêm kiểm tra URL (`isTrustedGameUrl` chỉ được bổ sung ở commit sửa sau); retry có giới hạn; `versionCode` 2 |
 | **4.0.0** | Port bộ tự động `#vlmAuto` từ bản PC (18 mục); sửa treo khung sau khi chat; DOM GC theo id thật; watchdog luân phiên 1.2s; `versionCode` 4. Một số hardening của 3.0.1 bị revert trong quá trình làm bản này |
+| **4.1.0** | Chrome 108dp → **dải trạng thái 32dp** + sheet điều khiển nhanh; đồng bộ auto và 🤖 Tự động chuyển từ drawer sang sheet; **số cửa sổ 1–8** (mặc định 4); **tự cập nhật từ GitHub Releases**; `versionCode` 5 |
 
 Chi tiết đầy đủ: `git log` trên nhánh `v3`. Commit `bd53f09` sửa lỗi biên dịch còn sót sau commit gỡ bộ chọn Cụm.
 
@@ -648,5 +753,8 @@ Không có quy trình đóng góp, không có CI, không có issue template. N�
 
 | Tài liệu | Nội dung |
 |---|---|
-| [`docs/PORT-DISCORD.md`](docs/PORT-DISCORD.md) | Hướng dẫn port cảnh báo Discord webhook từ bản PC sang Android. **Đây chỉ là tài liệu thiết kế/hướng dẫn; app 4.0.0 chưa có tính năng Discord** |
-| [`SECURITY.md`](SECURITY.md) | Đánh giá bảo mật cho bản 3.0.1. Một phần nội dung không còn đúng với 4.0.0 — đối chiếu [mục 15](#15-bảo-mật) |
+| [`docs/PORT-DISCORD.md`](docs/PORT-DISCORD.md) | Hướng dẫn port cảnh báo Discord webhook từ bản PC sang Android. **Đây chỉ là tài liệu thiết kế/hướng dẫn; app chưa có tính năng Discord** |
+| [`docs/DESIGN-LAYOUT.md`](docs/DESIGN-LAYOUT.md) | Đặc tả bố cục 32dp: ngân sách chiều cao, vị trí từng nút, vì sao dải đáy phải là sibling chứ không phải overlay |
+| [`docs/DESIGN-TAB-COUNT.md`](docs/DESIGN-TAB-COUNT.md) | Đặc tả 1–8 tab: `TabLimits`, quy tắc `cols/rows`, cách giữ nguyên pixel ở N ≤ 4, kế hoạch đo và cổng ship N = 8 |
+| [`docs/DESIGN-AUTOUPDATE.md`](docs/DESIGN-AUTOUPDATE.md) | Đặc tả tự cập nhật: state machine, allowlist host, kiểm tra signer, vì sao SHA-256 không phải ranh giới bảo mật |
+| [`SECURITY.md`](SECURITY.md) | Đánh giá bảo mật tĩnh cho `v4.0.0` và các kiểm soát của kênh tự cập nhật. Đối chiếu [mục 15](#15-bảo-mật) |

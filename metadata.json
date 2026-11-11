@@ -1,6 +1,6 @@
 {
   "name": "Võ Lâm Idle",
-  "description": "Quản lý 4 tài khoản webgame Võ Lâm Idle đa profile trên Android, tự động đăng nhập và tối ưu phần cứng.",
+  "description": "Quản lý 1–8 tài khoản webgame Võ Lâm Idle đa profile trên Android, tự động đăng nhập và tối ưu phần cứng.",
   "requestFramePermissions": [],
   "majorCapabilities": [
     "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"

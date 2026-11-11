@@ -49,20 +49,18 @@ import com.example.model.TabLifecycleState
 @Composable
 fun SidebarView(
     isMasterAutoRunning: Boolean,
+    tabCount: Int,
     characterStatsList: List<CharacterStats>,
     selectedTabIndex: Int,
     onSelectTab: (Int) -> Unit,
     onLoginAll: () -> Unit,
     onStopAll: () -> Unit,
     onEditAccount: (Int) -> Unit,
-    onSyncAutoMode: (String) -> Unit,
     onToggleSidebar: () -> Unit,
     modifier: Modifier = Modifier.width(265.dp),
     getAccount: ((Int) -> com.example.model.AccountConfig)? = null,
     isBlackScreenSynced: Boolean = false,
-    onSyncBlackScreen: (Boolean) -> Unit = {},
-    isAutoPilotOn: Boolean = false,
-    onOpenAutoConfig: () -> Unit = {}
+    onSyncBlackScreen: (Boolean) -> Unit = {}
 ) {
     Surface(
         modifier = modifier
@@ -174,7 +172,7 @@ fun SidebarView(
             // MODULE 6: SECTION 1 (4 CHARACTER SLOTS)
             // STRICT SIZE CONSTRAINT: Fixed height 74dp - 80dp, maxLines = 1, singleLine = true, cleaned string
             Text(
-                text = "DANH SÁCH NHÂN VẬT (4 TAB)",
+                text = "DANH SÁCH NHÂN VẬT ($tabCount TAB)",
                 color = Color(0xFF94A3B8),
                 fontSize = 10.sp,
                 fontWeight = FontWeight.SemiBold
@@ -185,7 +183,7 @@ fun SidebarView(
                 verticalArrangement = Arrangement.spacedBy(5.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                for (tabIdx in 0..3) {
+                for (tabIdx in 0 until tabCount) {
                     val stats = characterStatsList.getOrElse(tabIdx) { CharacterStats(tabIndex = tabIdx) }
                     val isSelected = selectedTabIndex == tabIdx
                     val account = getAccount?.invoke(tabIdx)
@@ -242,62 +240,9 @@ fun SidebarView(
             HorizontalDivider(color = Color(0xFF1E293B), thickness = 1.dp)
             Spacer(modifier = Modifier.height(8.dp))
 
-            // MODULE 7: SECTION 5 (SYNC AUTO MODE - NHIỆM VỤ, PHÓ BẢN, LUYỆN CÔNG)
-            Text(
-                text = "ĐỒNG BỘ AUTO CẢ 4 TAB",
-                color = Color(0xFF94A3B8),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("sync_mode_row"),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
-            ) {
-                Button(
-                    onClick = { onSyncAutoMode("Nhiệm Vụ") },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(30.dp)
-                        .testTag("sync_quest_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF1D4ED8)),
-                    shape = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text(text = "📜 Nhiệm Vụ", fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                }
-
-                Button(
-                    onClick = { onSyncAutoMode("Phó Bản") },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(30.dp)
-                        .testTag("sync_dungeon_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF9333EA)),
-                    shape = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text(text = "⚔️ Phó Bản", fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                }
-
-                Button(
-                    onClick = { onSyncAutoMode("Luyện Công") },
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(30.dp)
-                        .testTag("sync_grind_button"),
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFD97706)),
-                    shape = RoundedCornerShape(4.dp),
-                    contentPadding = PaddingValues(0.dp)
-                ) {
-                    Text(text = "🔥 Luyện Công", fontSize = 9.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-                }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
+            // Đồng bộ chế độ Auto và 🤖 Tự động đã chuyển sang ControlSheet (bảng điều khiển
+            // nhanh) — người dùng không phải mở drawer mới bấm được. Drawer chỉ còn control
+            // theo nhân vật/tab.
 
             // Ô chức năng "Màn hình đen" có ô trắng tích chọn phía trước (Hệ thống -> Hiển Thị -> Màn hình đen)
             Surface(
@@ -356,44 +301,13 @@ fun SidebarView(
                     }
 
                     Text(
-                        text = if (isBlackScreenSynced) "🟢 Đang bật (4 Tab)" else "⚙️ Hệ thống ➔ Hiển Thị",
+                        text = if (isBlackScreenSynced) "🟢 Đang bật ($tabCount Tab)" else "⚙️ Hệ thống ➔ Hiển Thị",
                         color = if (isBlackScreenSynced) Color(0xFF6EE7B7) else Color(0xFF94A3B8),
                         fontSize = 8.5.sp,
                         fontWeight = FontWeight.Medium,
                         maxLines = 1
                     )
                 }
-            }
-
-            Spacer(modifier = Modifier.height(6.dp))
-
-            // MODULE 8: Mở bảng 🤖 Tự động (bản Android của mục "Tự động" trong Manager PC).
-            // Màu hổ phách để tách khỏi nhóm nút đồng bộ chế độ và không lẫn với "Màn hình đen".
-            Button(
-                onClick = onOpenAutoConfig,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(34.dp)
-                    .testTag("open_auto_config_button"),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isAutoPilotOn) Color(0xFF065F46) else Color(0xFF78350F)
-                ),
-                shape = RoundedCornerShape(6.dp),
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
-            ) {
-                Text(
-                    text = "🤖 Tự động",
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (isAutoPilotOn) "🟢 ĐANG BẬT" else "⚪ Đang tắt",
-                    fontSize = 8.5.sp,
-                    color = if (isAutoPilotOn) Color(0xFF6EE7B7) else Color(0xFFFCD34D),
-                    maxLines = 1
-                )
             }
 
             Spacer(modifier = Modifier.height(12.dp))

@@ -1,6 +1,7 @@
 package com.example.webview
 
 import android.annotation.SuppressLint
+import android.app.ActivityManager
 import android.content.Context
 import android.graphics.Bitmap
 import android.os.Build
@@ -15,12 +16,14 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.widget.Toast
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
 import com.example.KeepAliveService
 import com.example.data.PreferencesManager
 import com.example.model.CharacterStats
 import com.example.model.TabLifecycleState
+import com.example.model.TabLimits
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -80,8 +83,13 @@ class GameTabManager(
 ) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
-    private val contextWrappers = Array(4) { android.content.MutableContextWrapper(context) }
-    private val isDesktopMode = BooleanArray(4) { false }
+    // Mọi mảng theo index tab đều cấp phát ĐÚNG TabLimits.SLOT_COUNT phần tử MỘT LẦN và
+    // KHÔNG BAO GIỜ cấp lại: onRenderProcessGone, các Runnable retry và coroutine watchdog
+    // giữ index đã chụp trước khi người dùng đổi số tab. Cấp lại mảng sẽ làm chúng trỏ sai.
+    private val contextWrappers = Array(TabLimits.SLOT_COUNT) {
+        android.content.MutableContextWrapper(context)
+    }
+    private val isDesktopMode = BooleanArray(TabLimits.SLOT_COUNT) { false }
 
     fun updateActivityContext(activityContext: Context) {
         for (wrapper in contextWrappers) {
@@ -95,32 +103,61 @@ class GameTabManager(
     private val _isSystemRunning = MutableStateFlow(false)
     val isSystemRunning: StateFlow<Boolean> = _isSystemRunning.asStateFlow()
 
+    // LUÔN 8 entry, tất cả IDLE. setTabState/updateStatus/onGameStateScanned ghi theo index
+    // mà không kiểm biên so với một lần giảm tab đang nằm trong mainHandler.post xếp hàng
+    // trước; list luôn đủ dài nên mọi lần ghi index không thể ném. UI mới là nơi ẩn entry ≥ N.
     private val _characterStatsList = MutableStateFlow<List<CharacterStats>>(
-        (0..3).map { CharacterStats(tabIndex = it, state = TabLifecycleState.IDLE) }
+        (0 until TabLimits.SLOT_COUNT).map {
+            CharacterStats(tabIndex = it, state = TabLifecycleState.IDLE)
+        }
     )
     val characterStatsList: StateFlow<List<CharacterStats>> = _characterStatsList.asStateFlow()
 
-    private val webViews = arrayOfNulls<KeepAliveWebView>(4)
-    private val isTabActive = BooleanArray(4) { false }
+    private val webViews = arrayOfNulls<KeepAliveWebView>(TabLimits.SLOT_COUNT)
+    private val isTabActive = BooleanArray(TabLimits.SLOT_COUNT) { false }
+
+    // ===== Số tab đang chạy (docs/DESIGN-TAB-COUNT.md) =====
+    // Trần thực tế: máy RAM thấp bị chặn ở 4 (quá 4 renderer là OOM).
+    val isLowRam: Boolean = isLowRamDevice()
+    val maxTabCount: Int = if (isLowRam) TabLimits.RECOMMENDED_MAX else TabLimits.HARD_MAX
+
+    // `@Volatile` vì watchdog/GC/coroutine đọc từ luồng khác. Không cấp lại mảng khi đổi N.
+    // Clamp khi ĐỌC: một giá trị 8 do máy khác/backup để lại không được vượt trần low-RAM.
+    @Volatile
+    private var tabCount: Int = prefs.getTabCount()
+        .coerceIn(TabLimits.MIN, maxTabCount)
+
+    private val _tabCountState = MutableStateFlow(tabCount)
+    val tabCountState: StateFlow<Int> = _tabCountState.asStateFlow()
+
+    /** VM cần đồng bộ khi manager tự hạ FPS lúc vượt 4 tab. */
+    var onFpsChanged: ((Int) -> Unit)? = null
 
     private var loginQueueJob: Job? = null
     private var periodicWatchdogJob: Job? = null
     private var garbageCollectionJob: Job? = null
 
     // Đếm số lần tự tải lại khi lỗi máy chủ tạm thời, để không lặp vô hạn
-    private val mainFrameRetryCount = IntArray(4) { 0 }
+    private val mainFrameRetryCount = IntArray(TabLimits.SLOT_COUNT) { 0 }
 
     // Lỗi main-frame gần nhất của từng tab. null = trang hiện tại không có lỗi.
     // Dùng để onPageFinished biết đây là trang lỗi nội bộ của Chromium, không phải trang thật.
-    private val lastMainFrameError = arrayOfNulls<Int>(4)
+    private val lastMainFrameError = arrayOfNulls<Int>(TabLimits.SLOT_COUNT)
 
     // Mỗi tab giữ đúng 1 Runnable hẹn giờ tải lại để removeCallbacks được chính xác,
     // tránh các lần postDelayed chồng lên nhau thành vòng lặp reload dày đặc.
-    private val retryRunnables = arrayOfNulls<Runnable>(4)
+    private val retryRunnables = arrayOfNulls<Runnable>(TabLimits.SLOT_COUNT)
 
     // Callback gắn WebView vào đúng ô hiển thị của tab, do GameWebViewContainer đăng ký 1 lần
     // (ô được tạo trong remember{} nên không tự tạo lại khi WebView bị thay thế).
-    private val slotAttachers = arrayOfNulls<(WebView) -> Unit>(4)
+    private val slotAttachers = arrayOfNulls<(WebView) -> Unit>(TabLimits.SLOT_COUNT)
+
+    // ===== Chặn vòng lặp chết khi vượt giới hạn renderer (§6) =====
+    // Mỗi tab giữ mốc các lần tự phục hồi. ≥3 lần trong 120s ⇒ thôi tự phục hồi: mỗi lần
+    // reopen lại tạo thêm một renderer, đúng thứ vừa làm máy hết RAM.
+    private val recoveryHistory =
+        Array(TabLimits.SLOT_COUNT) { java.util.ArrayDeque<Long>() }
+    private val recoveryBlocked = BooleanArray(TabLimits.SLOT_COUNT) { false }
 
     // =========================================================================
     // MODULE 8: TỰ ĐỘNG TRONG GAME
@@ -129,7 +166,7 @@ class GameTabManager(
     // =========================================================================
     private val autoPilot: GameAutoPilot = GameAutoPilot(
         scope = coroutineScope,
-        tabCount = 4,
+        tabCount = { tabCount },
         initialConfigJson = prefs.getAutoConfig(),
         webViewAt = { i -> webViews.getOrNull(i) },
         isTabActive = { i -> isTabActive.getOrNull(i) == true },
@@ -147,7 +184,7 @@ class GameTabManager(
     }
 
     fun registerSlot(tabIndex: Int, attacher: (WebView) -> Unit) {
-        if (tabIndex in 0..3) {
+        if (tabIndex in webViews.indices) {
             slotAttachers[tabIndex] = attacher
         }
     }
@@ -160,12 +197,12 @@ class GameTabManager(
      * - vòng đăng nhập 850ms vẫn inject script (quét DOM + click tổng hợp) đúng lúc người dùng
      *   đang bấm nút, và
      * - watchdog 1200ms vẫn bấm "Chơi ở đây" / đóng `<select>` đang mở.
-     * Đó chính là lớp lỗi làm treo khung HUD ở 4.0.0. Đẩy mốc thời gian cho cả 4 tab để mọi
+     * Đó chính là lớp lỗi làm treo khung HUD ở 4.0.0. Đẩy mốc thời gian cho MỌI slot để mọi
      * vòng quét đều thấy "vừa có tương tác" và tự lùi lại 5 giây.
      */
     fun markUiInteraction() {
         val now = System.currentTimeMillis()
-        for (i in 0..3) {
+        for (i in webViews.indices) {
             webViews[i]?.lastTouchTimeMs = now
         }
     }
@@ -175,18 +212,32 @@ class GameTabManager(
         private const val MAX_MAIN_FRAME_RETRY = 3
         private const val MAIN_FRAME_RETRY_BASE_MS = 2500L
 
-        // Nhịp quét luân phiên: mỗi nhịp quét 1 tab -> mỗi tab được quét lại sau ~4.8s.
+        // Nhịp quét luân phiên: mỗi nhịp quét 1 tab -> mỗi tab được quét lại sau ~4.8s ở N=4.
         // Tăng số này nếu muốn tiết kiệm pin hơn nữa; giảm nếu cần phát hiện văng game nhanh hơn.
+        // KHÔNG giảm theo N: độ trễ watchdog tăng tuyến tính theo N là rủi ro R7 đã chấp nhận.
         private const val WATCHDOG_TICK_MS = 1200L
 
-        // Dọn rác DOM: 90s/nhịp, luân phiên từng tab -> mỗi tab dọn lại sau ~6 phút.
+        // Dọn rác DOM: 90s/nhịp, luân phiên từng tab -> mỗi tab dọn lại sau ~6 phút ở N=4.
         private const val GC_TICK_MS = 90_000L
+
+        // Chặn vòng lặp chết: 3 lần phục hồi trong 120s thì dừng tự phục hồi tab đó.
+        private const val MAX_RECOVERIES_IN_WINDOW = 3
+        private const val RECOVERY_WINDOW_MS = 120_000L
+    }
+
+    private fun isLowRamDevice(): Boolean = try {
+        val am = context.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
+        am?.isLowRamDevice == true
+    } catch (_: Exception) {
+        false
     }
 
     init {
-        // Pre-create WebViews with strict Isolated Profiles, but DO NOT load URLs yet (Idle)
+        // Pre-create WebViews of the ACTIVE tab count with strict Isolated Profiles, but DO NOT
+        // load URLs yet (Idle). Không eager tới SLOT_COUNT: 8 renderer rỗng ngay lần composition
+        // đầu là ~2.4 GB cho người dùng chọn 1 tab.
         mainHandler.post {
-            for (i in 0..3) {
+            for (i in 0 until tabCount) {
                 getOrCreateWebView(i)
             }
         }
@@ -194,6 +245,99 @@ class GameTabManager(
         // Bắt đầu vòng giữ script tự động. Nếu cấu hình đã lưu đang bật thì tự khôi phục
         // sau khi mở lại app; nếu tắt (mặc định) thì vòng lặp chỉ ngủ.
         autoPilot.start()
+    }
+
+    // =========================================================================
+    // SỐ TAB — owner duy nhất là hàm này (clamp + persist + apply), trả về giá trị THẬT
+    // =========================================================================
+
+    /**
+     * Đổi số tab. UI phải lấy StateFlow từ giá trị TRẢ VỀ, không lấy từ yêu cầu.
+     *
+     * Giảm tab: `isTabActive[i] = false` TRƯỚC (để onRenderProcessGone đang đua không mở lại),
+     * rồi mới tháo → destroy → null, reset bộ đếm, đặt OFFLINE.
+     *
+     * KHÔNG dùng `pauseTimers()` để giảm tab — nó là process-global, dừng một tab sẽ đóng
+     * băng tất cả các tab còn lại.
+     */
+    fun setTabCount(requested: Int): Int {
+        val target = requested.coerceIn(TabLimits.MIN, maxTabCount)
+        val old = tabCount
+        if (target == old) return target
+
+        // Chặn ngay mọi vòng quét/retry chạm vào slot sắp bị tháo.
+        if (target < old) {
+            for (i in target until old) {
+                isTabActive[i] = false
+            }
+        }
+
+        // Gán trước khi teardown: mọi vòng lặp `0 until tabCount` lập tức thu về N mới.
+        tabCount = target
+        prefs.setTabCount(target)
+        _tabCountState.value = target
+
+        mainHandler.post {
+            if (target < old) {
+                for (i in target until old) {
+                    // N có thể đã tăng lại trước khi block này chạy (người dùng bấm nhanh
+                    // 8 → 5 → 7): chỉ tháo slot thật sự còn NGOÀI số tab hiện tại, nếu không
+                    // sẽ destroy đúng WebView vừa được bật lại.
+                    if (i >= tabCount) {
+                        tearDownSlot(i)
+                    }
+                }
+            }
+
+            // Vượt 4 tab: hạ 60 → 30 FPS. intervalMs 33 vs 16 giảm một nửa công JS mỗi tab.
+            if (tabCount > TabLimits.RECOMMENDED_MAX && prefs.getFps() != 30) {
+                applyFps(30)
+                onFpsChanged?.invoke(30)
+                runCatching {
+                    Toast.makeText(
+                        context,
+                        "Đã hạ xuống 30 FPS để giữ ổn định khi chạy $tabCount tab.",
+                        Toast.LENGTH_LONG
+                    ).show()
+                }
+            }
+
+            // Tăng tab trong lúc hệ thống đang chạy: tự mở + đăng nhập các tab mới, giãn cách
+            // 800ms như loginAll. Đây là hành vi đã hứa trong hộp thoại giảm tab
+            // ("tăng lại số tab sau sẽ tự đăng nhập lại"); WebView vẫn được tạo lazy, không
+            // tạo eager cho slot chưa dùng.
+            if (target > old && _isSystemRunning.value) {
+                for (i in old until target) {
+                    mainHandler.postDelayed({
+                        if (i < tabCount) openSingleTab(i)
+                    }, 800L * (i - old))
+                }
+            }
+
+            adjustAllViewports()
+        }
+        return target
+    }
+
+    /** Tháo một slot: cancel retry → detach → destroy → null → reset → OFFLINE. */
+    private fun tearDownSlot(i: Int) {
+        if (i !in webViews.indices) return
+        isTabActive[i] = false
+        retryRunnables[i]?.let { mainHandler.removeCallbacks(it) }
+        retryRunnables[i] = null
+        try {
+            val old = webViews[i]
+            (old?.parent as? ViewGroup)?.removeView(old)
+        } catch (_: Exception) {}
+        try {
+            webViews[i]?.destroy()
+        } catch (_: Exception) {}
+        webViews[i] = null
+        mainFrameRetryCount[i] = 0
+        lastMainFrameError[i] = null
+        setTabState(i, TabLifecycleState.OFFLINE)
+        updateStatus(i, "Đã dừng (Offline)")
+        autoPilot.onTabRemoved(i)
     }
 
     private fun getClusterId(): String {
@@ -206,6 +350,7 @@ class GameTabManager(
 
     @SuppressLint("SetJavaScriptEnabled")
     fun getOrCreateWebView(tabIndex: Int): WebView {
+        require(tabIndex in webViews.indices) { "tabIndex $tabIndex ngoài dải slot" }
         val existing = webViews[tabIndex]
         if (existing != null) {
             return existing
@@ -217,6 +362,9 @@ class GameTabManager(
         // WebViewCompat.setProfile(webView, "Isolated_Cluster_${clusterId}_Tab_${tabIndex}")
         // Tuyệt đối KHÔNG được gọi webView.settings, CookieManager, hay bất kỳ hàm nào
         // của webView trước dòng này để tránh bị khóa vào Default Profile!
+        //
+        // TÊN PROFILE ĐÓNG BĂNG: cookie/localStorage nằm trên đĩa theo đúng chuỗi này.
+        // Không suy ra từ tabCount, không "nén" index, cấm đổi thứ tự tab, không deleteProfile.
         // =========================================================================
         val webView = KeepAliveWebView(contextWrappers[tabIndex])
         val clusterId = getClusterId()
@@ -353,6 +501,8 @@ class GameTabManager(
                 retryRunnables[tabIndex]?.let { mainHandler.removeCallbacks(it) }
                 val retryRunnable = Runnable {
                     retryRunnables[tabIndex] = null
+                    // Slot đã bị tháo do giảm số tab: không được tải lại vào WebView đã destroy.
+                    if (tabIndex >= tabCount) return@Runnable
                     if (isTabActive[tabIndex] && _isSystemRunning.value) {
                         val account = prefs.getAccount(tabIndex)
                         val targetUrl = account.customUrl.ifBlank { prefs.getClusterUrl(prefs.getCluster()) }
@@ -383,9 +533,30 @@ class GameTabManager(
                     } catch (_: Exception) {}
                     webViews[tabIndex] = null
 
-                    if (_isSystemRunning.value && isTabActive[tabIndex]) {
-                        reopenAndReloginTab(tabIndex)
+                    // Slot đã bị tháo (giảm số tab trong lúc renderer chết): không phục hồi.
+                    if (tabIndex >= tabCount) return@post
+                    if (!_isSystemRunning.value || !isTabActive[tabIndex]) return@post
+
+                    // Chặn vòng lặp chết: mỗi lần phục hồi lại đẻ thêm một renderer — đúng thứ
+                    // vừa làm máy hết RAM. ≥3 lần trong 120s thì thôi, đặt OFFLINE và nói rõ.
+                    if (recoveryBlocked[tabIndex]) {
+                        setTabState(tabIndex, TabLifecycleState.OFFLINE)
+                        return@post
                     }
+                    val now = System.currentTimeMillis()
+                    val history = recoveryHistory[tabIndex]
+                    while (history.isNotEmpty() && now - history.first() > RECOVERY_WINDOW_MS) {
+                        history.removeFirst()
+                    }
+                    history.addLast(now)
+                    if (history.size >= MAX_RECOVERIES_IN_WINDOW) {
+                        recoveryBlocked[tabIndex] = true
+                        setTabState(tabIndex, TabLifecycleState.OFFLINE)
+                        updateStatus(tabIndex, "⚠️ Máy hết RAM – hãy giảm số tab")
+                        return@post
+                    }
+
+                    reopenAndReloginTab(tabIndex)
                 }
                 return true
             }
@@ -412,8 +583,11 @@ class GameTabManager(
 
         startLoginStepLoop()
         coroutineScope.launch(Dispatchers.Main) {
-            for (i in 0..3) {
+            val total = tabCount
+            for (i in 0 until total) {
                 if (!_isSystemRunning.value) break
+                // Số tab có thể giảm giữa vòng lặp: không mở slot đã bị tháo.
+                if (i >= tabCount) break
                 isTabActive[i] = true
                 val account = prefs.getAccount(i)
                 val targetUrl = account.customUrl.ifBlank { defaultUrl }
@@ -438,7 +612,7 @@ class GameTabManager(
                     wv.evaluateJavascript(script, null)
                 }
                 // Giãn cách 800ms giữa các tab để thiết lập kết nối SSL/WebSocket mượt mà, không bị từ chối
-                if (i < 3) {
+                if (i < total - 1) {
                     delay(800)
                 }
             }
@@ -447,6 +621,12 @@ class GameTabManager(
 
     // Mở và đăng nhập riêng 1 Tab
     fun openSingleTab(tabIndex: Int) {
+        if (tabIndex !in 0 until tabCount) return
+        // Người dùng chủ động mở lại tab: xoá lịch sử phục hồi để chặn-vòng-lặp không
+        // khoá vĩnh viễn một tab chỉ vì máy từng hết RAM (§6).
+        recoveryBlocked[tabIndex] = false
+        recoveryHistory[tabIndex].clear()
+
         _isSystemRunning.value = true
         isTabActive[tabIndex] = true
         KeepAliveService.start(context)
@@ -459,6 +639,7 @@ class GameTabManager(
         val targetUrl = account.customUrl.ifBlank { defaultUrl }
 
         mainHandler.post {
+            if (tabIndex >= tabCount) return@post
             val wv = getOrCreateWebView(tabIndex)
             wv.resumeTimers()
             setTabState(tabIndex, TabLifecycleState.LOGGING_IN)
@@ -483,6 +664,7 @@ class GameTabManager(
 
     // QUY CHUẨN 4: Tự mở lại Tab và đăng nhập lại khi bị văng
     fun reopenAndReloginTab(tabIndex: Int) {
+        if (tabIndex !in 0 until tabCount) return
         if (!_isSystemRunning.value || !isTabActive[tabIndex]) return
         val cluster = prefs.getCluster()
         val defaultUrl = prefs.getClusterUrl(cluster)
@@ -490,6 +672,7 @@ class GameTabManager(
         val targetUrl = account.customUrl.ifBlank { defaultUrl }
 
         mainHandler.post {
+            if (tabIndex >= tabCount) return@post
             val wv = getOrCreateWebView(tabIndex)
             wv.resumeTimers()
             setTabState(tabIndex, TabLifecycleState.LOGGING_IN)
@@ -506,7 +689,7 @@ class GameTabManager(
     fun stopAll() {
         _isSystemRunning.value = false
         mainHandler.post {
-            for (i in 0..3) {
+            for (i in 0 until tabCount) {
                 isTabActive[i] = false
                 val wv = webViews[i]
                 if (wv != null) {
@@ -524,6 +707,7 @@ class GameTabManager(
 
     // Dừng 1 Tab
     fun stopSingleTab(tabIndex: Int) {
+        if (tabIndex !in webViews.indices) return
         isTabActive[tabIndex] = false
         mainHandler.post {
             val wv = webViews[tabIndex]
@@ -540,6 +724,7 @@ class GameTabManager(
 
     // QUY CHUẨN 1: Đóng băng session riêng biệt khi đổi tài khoản
     fun onAccountChanged(tabIndex: Int) {
+        if (tabIndex !in webViews.indices) return
         mainHandler.post {
             val wv = webViews[tabIndex]
             val account = prefs.getAccount(tabIndex)
@@ -557,11 +742,11 @@ class GameTabManager(
         }
     }
 
-    // Căn chỉnh lại Viewport khi đổi layout (4 Dọc <-> Lưới 2x2 <-> 1 Tab)
+    // Căn chỉnh lại Viewport khi đổi layout hoặc đổi số tab
     fun adjustAllViewports() {
         mainHandler.post {
             val script = GameScriptInjector.buildAdjustViewportScript()
-            for (i in 0..3) {
+            for (i in 0 until tabCount) {
                 val wv = webViews[i] ?: continue
                 wv.evaluateJavascript(script, null)
                 if (_isSystemRunning.value && isTabActive[i]) {
@@ -584,6 +769,7 @@ class GameTabManager(
 
     // Chuyển đổi giữa chế độ Web PC và Mobile
     fun toggleDesktopMode(tabIndex: Int): Boolean {
+        if (tabIndex !in webViews.indices) return false
         isDesktopMode[tabIndex] = !isDesktopMode[tabIndex]
         val isPC = isDesktopMode[tabIndex]
         mainHandler.post {
@@ -609,7 +795,7 @@ class GameTabManager(
             KeepAliveService.start(context)
         }
         mainHandler.post {
-            for (i in 0..3) {
+            for (i in 0 until tabCount) {
                 val wv = webViews[i] ?: continue
                 wv.keepAliveInBackground = true
                 if (isTabActive[i]) {
@@ -631,7 +817,7 @@ class GameTabManager(
     fun onAppForegrounded() {
         mainHandler.post {
             val gcScript = GameScriptInjector.buildDomGarbageCollectionScript()
-            for (i in 0..3) {
+            for (i in 0 until tabCount) {
                 val wv = webViews[i] ?: continue
                 wv.keepAliveInBackground = false // TẮT lừa dối hệ điều hành để Select/Dropdown hoạt động bình thường
                 if (isTabActive[i]) {
@@ -653,7 +839,7 @@ class GameTabManager(
     fun syncAutoMode(modeText: String) {
         mainHandler.post {
             val script = GameScriptInjector.buildSyncAutoModeScript(modeText)
-            for (i in 0..3) {
+            for (i in 0 until tabCount) {
                 val wv = webViews[i]
                 if (wv != null && isTabActive[i]) {
                     wv.evaluateJavascript(script) { result ->
@@ -673,11 +859,11 @@ class GameTabManager(
         }
     }
 
-    // Đồng bộ bật/tắt Màn hình đen trong game (Hệ thống -> Hiển Thị -> Màn hình đen) cho cả 4 Tab
+    // Đồng bộ bật/tắt Màn hình đen trong game (Hệ thống -> Hiển Thị -> Màn hình đen)
     fun syncBlackScreen(enabled: Boolean) {
         mainHandler.post {
             val script = GameScriptInjector.buildSyncBlackScreenScript(enabled)
-            for (i in 0..3) {
+            for (i in 0 until tabCount) {
                 val wv = webViews[i]
                 if (wv != null && isTabActive[i]) {
                     wv.evaluateJavascript(script) { _ ->
@@ -695,7 +881,7 @@ class GameTabManager(
         prefs.setFps(fps)
         mainHandler.post {
             val script = GameScriptInjector.buildFpsLimiterScript(fps)
-            for (i in 0..3) {
+            for (i in 0 until tabCount) {
                 webViews[i]?.evaluateJavascript(script, null)
             }
         }
@@ -707,7 +893,7 @@ class GameTabManager(
         if (_isSystemRunning.value) {
             // Re-create WebViews with new profile
             mainHandler.post {
-                for (i in 0..3) {
+                for (i in webViews.indices) {
                     // Hủy lần hẹn giờ tải lại còn treo, tránh reload vào WebView sắp bị destroy
                     retryRunnables[i]?.let { mainHandler.removeCallbacks(it) }
                     retryRunnables[i] = null
@@ -734,7 +920,9 @@ class GameTabManager(
             while (true) {
                 delay(850)
                 if (_isSystemRunning.value) {
-                    for (i in 0..3) {
+                    val count = tabCount
+                    if (count <= 0) continue
+                    for (i in 0 until count) {
                         if (isTabActive[i]) {
                             val currentStats = _characterStatsList.value.getOrNull(i)
                             if (currentStats?.state == TabLifecycleState.LOGGING_IN) {
@@ -766,23 +954,24 @@ class GameTabManager(
         startLoginStepLoop()
 
         // =========================================================================
-        // QUY CHUẨN 4: BỘ CANH GÁC & QUÉT THÔNG SỐ ĐỊNH KỲ (mỗi 2500ms)
+        // QUY CHUẨN 4: BỘ CANH GÁC & QUÉT THÔNG SỐ ĐỊNH KỲ (mỗi 1200ms, luân phiên)
         // Chạy trên các tab đang hoạt động để:
         // 1. Tự động bấm "Chơi ở đây" / "Chơi ở tab này" ngay khi xuất hiện thông báo
         // 2. Tự động phục hồi tab khi văng ra màn hình đăng nhập
         // 3. Quét thông số nhân vật (Khu vực 1, 3, 4)
+        //
+        // Độ trễ phát hiện tăng tuyến tính theo N (4.8s ở N=4 → 9.6s ở N=8). Đây là đánh đổi
+        // đã biết (R7): giảm WATCHDOG_TICK_MS sẽ tăng CPU tuyến tính, đúng thứ đang tránh.
         // =========================================================================
         periodicWatchdogJob = coroutineScope.launch(Dispatchers.Main) {
-            // Quét LUÂN PHIÊN: mỗi nhịp chỉ quét 1 tab thay vì cả 4.
-            // Trước đây: 4 tab / 2500ms = 1.6 lượt quét DOM mỗi giây -> app process ~72% CPU.
-            // Nay: 1 tab / 1200ms = 0.83 lượt/giây (giảm ~2 lần), mỗi tab được quét lại sau ~4.8s
-            // — vẫn đủ nhanh để phát hiện bị văng ra màn hình đăng nhập.
             var nextTab = 0
             while (true) {
                 delay(WATCHDOG_TICK_MS)
                 if (_isSystemRunning.value) {
-                    val i = nextTab
-                    nextTab = (nextTab + 1) % 4
+                    val count = tabCount
+                    if (count <= 0) continue
+                    val i = nextTab % count
+                    nextTab = (nextTab + 1) % count
                     val wv = webViews[i]
                     // Tạm dừng quét 5 giây nếu người dùng vừa chạm tay vào WebView này
                     if (wv != null && System.currentTimeMillis() - wv.lastTouchTimeMs >= 5000L && isTabActive[i]) {
@@ -804,8 +993,10 @@ class GameTabManager(
             var nextTab = 0
             while (true) {
                 delay(GC_TICK_MS)
-                val i = nextTab
-                nextTab = (nextTab + 1) % 4
+                val count = tabCount
+                if (count <= 0) continue
+                val i = nextTab % count
+                nextTab = (nextTab + 1) % count
                 val wv = webViews[i] ?: continue
                 if (wv.url == null || wv.url == "about:blank") continue
                 if (System.currentTimeMillis() - wv.lastTouchTimeMs < 5000L) continue
@@ -815,24 +1006,29 @@ class GameTabManager(
     }
 
     private fun setTabState(tabIndex: Int, state: TabLifecycleState) {
-        val currentList = _characterStatsList.value.toMutableList()
-        val existing = currentList.getOrNull(tabIndex) ?: CharacterStats(tabIndex = tabIndex)
-        currentList[tabIndex] = existing.copy(
+        val currentList = _characterStatsList.value
+        // List luôn có SLOT_COUNT entry; guard chỉ để một index rác không làm ném.
+        if (tabIndex !in currentList.indices) return
+        val mutable = currentList.toMutableList()
+        val existing = mutable[tabIndex] ?: CharacterStats(tabIndex = tabIndex)
+        mutable[tabIndex] = existing.copy(
             state = state,
             isOnline = (state == TabLifecycleState.IN_GAME),
             lastUpdateEpoch = System.currentTimeMillis()
         )
-        _characterStatsList.value = currentList
+        _characterStatsList.value = mutable
     }
 
     private fun updateStatus(tabIndex: Int, status: String) {
-        val currentList = _characterStatsList.value.toMutableList()
-        val existing = currentList.getOrNull(tabIndex) ?: CharacterStats(tabIndex = tabIndex)
-        currentList[tabIndex] = existing.copy(
+        val currentList = _characterStatsList.value
+        if (tabIndex !in currentList.indices) return
+        val mutable = currentList.toMutableList()
+        val existing = mutable[tabIndex] ?: CharacterStats(tabIndex = tabIndex)
+        mutable[tabIndex] = existing.copy(
             lastStatus = status,
             lastUpdateEpoch = System.currentTimeMillis()
         )
-        _characterStatsList.value = currentList
+        _characterStatsList.value = mutable
     }
 
     fun cleanup() {
@@ -841,7 +1037,7 @@ class GameTabManager(
         garbageCollectionJob?.cancel()
         autoPilot.shutdown()
         mainHandler.post {
-            for (i in 0..3) {
+            for (i in webViews.indices) {
                 retryRunnables[i]?.let { mainHandler.removeCallbacks(it) }
                 retryRunnables[i] = null
                 // Tháo khỏi cây View trước khi destroy (xem onRenderProcessGone)
@@ -871,6 +1067,7 @@ class GameTabManager(
         @JavascriptInterface
         fun onGameKickedDetected(idx: Int) {
             mainHandler.post {
+                if (tabIndex >= tabCount) return@post
                 if (_isSystemRunning.value && isTabActive[tabIndex]) {
                     setTabState(tabIndex, TabLifecycleState.LOGGING_IN)
                     updateStatus(tabIndex, "⚡ Tự động đăng nhập...")
@@ -891,9 +1088,10 @@ class GameTabManager(
         fun onGameStateScanned(idx: Int, jsonStr: String) {
             mainHandler.post {
                 try {
+                    if (tabIndex !in _characterStatsList.value.indices) return@post
                     val json = JSONObject(jsonStr)
                     val currentList = _characterStatsList.value.toMutableList()
-                    val prev = currentList.getOrNull(tabIndex) ?: CharacterStats(tabIndex = tabIndex)
+                    val prev = currentList[tabIndex] ?: CharacterStats(tabIndex = tabIndex)
 
                     val charName = json.optString("characterName", prev.characterName)
                         .replace("\n", " ").replace(Regex("\\s+"), " ").trim()
@@ -932,7 +1130,7 @@ class GameTabManager(
                         lastUpdateEpoch = System.currentTimeMillis()
                     )
                     // Chỉ phát StateFlow khi dữ liệu hiển thị THỰC SỰ đổi.
-                    // Mỗi lần phát là một lượt recompose toàn bộ Sidebar + HeaderBar;
+                    // Mỗi lần phát là một lượt recompose toàn bộ Sidebar;
                     // quét định kỳ mà dữ liệu không đổi thì bỏ qua để đỡ tốn CPU.
                     val updated = currentList[tabIndex]
                     val changed = updated.state != prev.state ||
@@ -956,8 +1154,9 @@ class GameTabManager(
         @JavascriptInterface
         fun onGameLog(idx: Int, message: String) {
             mainHandler.post {
+                if (tabIndex !in _characterStatsList.value.indices) return@post
                 val currentList = _characterStatsList.value.toMutableList()
-                val prev = currentList.getOrNull(tabIndex) ?: CharacterStats(tabIndex = tabIndex)
+                val prev = currentList[tabIndex] ?: CharacterStats(tabIndex = tabIndex)
                 currentList[tabIndex] = prev.copy(
                     lastStatus = message.replace("\n", " ").replace(Regex("\\s+"), " ").trim(),
                     lastUpdateEpoch = System.currentTimeMillis()

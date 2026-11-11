@@ -24,6 +24,26 @@ class PreferencesManager(context: Context) {
         // nằm trong AutoConfig.fromJson().
         private const val KEY_AUTO_CFG = "pref_auto_cfg"
 
+        // ===== Tự động cập nhật (docs/DESIGN-AUTOUPDATE.md) =====
+        // ===== Số tab cấu hình được (docs/DESIGN-TAB-COUNT.md §8) =====
+        // Ghi bằng commit(): app chạy 24/7 và có thể bị thu hồi bất cứ lúc nào; một lần ghi
+        // bất đồng bộ bị mất sẽ trả UI về số tab khác với màn hình đang vẽ.
+        private const val KEY_TAB_COUNT = "pref_tab_count"
+        private const val KEY_TAB_WARN_SHOWN = "pref_tab_warn_shown"
+
+        /** Sàn 12h của vòng kiểm tra tự động (chống đốt 60 request/giờ/IP của GitHub API). */
+        private const val KEY_UPDATE_LAST_ATTEMPT = "update_last_check_attempt"
+        private const val KEY_UPDATE_LAST_MANUAL = "update_last_manual_check"
+        private const val KEY_UPDATE_ETAG = "update_etag"
+        private const val KEY_UPDATE_BLOCKED_UNTIL = "update_blocked_until"
+        private const val KEY_UPDATE_CACHED_RELEASE = "update_cached_release"
+        private const val KEY_UPDATE_BANNER_SHOWN_FOR = "update_banner_shown_for"
+
+        // Kết quả cài đặt: "status|message|versionName|timestamp". Kết quả thường tới ở
+        // process MỚI, nên đây là nguồn duy nhất còn lại khi UI mở lại.
+        private const val KEY_UPDATE_INSTALL_RESULT = "update_install_result"
+        private const val KEY_UPDATE_PENDING_ACTION = "pending_action"
+
         /** Host của máy chủ game duy nhất được tin cậy. */
         private const val GAME_HOST = "volamidle.pages.dev"
 
@@ -188,6 +208,89 @@ class PreferencesManager(context: Context) {
 
     fun getRxOffset(): Long = prefs.getLong(KEY_RX_OFFSET, 0L)
     fun getTxOffset(): Long = prefs.getLong(KEY_TX_OFFSET, 0L)
+
+    // =========================================================================
+    // SỐ TAB (1..8)
+    // =========================================================================
+
+    /**
+     * Clamp CẢ HAI CHIỀU: ghi để chuẩn hoá, đọc để một giá trị sửa tay (adb/backup) không
+     * index quá mảng `SLOT_COUNT`.
+     */
+    fun getTabCount(): Int = com.example.model.TabLimits.clamp(
+        prefs.getInt(KEY_TAB_COUNT, com.example.model.TabLimits.DEFAULT)
+    )
+
+    fun setTabCount(count: Int) {
+        prefs.edit().putInt(KEY_TAB_COUNT, com.example.model.TabLimits.clamp(count)).commit()
+    }
+
+    /** Đã hiện cảnh báo "trên 4 tab" một lần chưa. */
+    fun isTabWarnShown(): Boolean = prefs.getBoolean(KEY_TAB_WARN_SHOWN, false)
+
+    fun setTabWarnShown(shown: Boolean) {
+        prefs.edit().putBoolean(KEY_TAB_WARN_SHOWN, shown).apply()
+    }
+
+    // =========================================================================
+    // TỰ ĐỘNG CẬP NHẬT
+    // =========================================================================
+
+    fun getUpdateLastAttempt(): Long = prefs.getLong(KEY_UPDATE_LAST_ATTEMPT, 0L)
+
+    fun setUpdateLastAttempt(value: Long) {
+        prefs.edit().putLong(KEY_UPDATE_LAST_ATTEMPT, value).apply()
+    }
+
+    fun getUpdateLastManualCheck(): Long = prefs.getLong(KEY_UPDATE_LAST_MANUAL, 0L)
+
+    fun setUpdateLastManualCheck(value: Long) {
+        prefs.edit().putLong(KEY_UPDATE_LAST_MANUAL, value).apply()
+    }
+
+    /** ETag của response `releases/latest`; gửi lại bằng `If-None-Match` để nhận 304. */
+    fun getUpdateEtag(): String? = prefs.getString(KEY_UPDATE_ETAG, null)
+
+    fun setUpdateEtag(value: String?) {
+        prefs.edit().putString(KEY_UPDATE_ETAG, value).apply()
+    }
+
+    fun getUpdateBlockedUntil(): Long = prefs.getLong(KEY_UPDATE_BLOCKED_UNTIL, 0L)
+
+    fun setUpdateBlockedUntil(value: Long) {
+        prefs.edit().putLong(KEY_UPDATE_BLOCKED_UNTIL, value).apply()
+    }
+
+    /** Release đã thấy gần nhất (JSON) — để 304 và lần mở sau vẫn tải/cài được. */
+    fun getCachedReleaseJson(): String? = prefs.getString(KEY_UPDATE_CACHED_RELEASE, null)
+
+    fun setCachedReleaseJson(value: String?) {
+        prefs.edit().putString(KEY_UPDATE_CACHED_RELEASE, value).apply()
+    }
+
+    /** `versionCode` của lần đã hiện banner; banner chỉ hiện tối đa 1 lần / versionCode. */
+    fun getUpdateBannerShownFor(): Int = prefs.getInt(KEY_UPDATE_BANNER_SHOWN_FOR, 0)
+
+    fun setUpdateBannerShownFor(value: Int) {
+        prefs.edit().putInt(KEY_UPDATE_BANNER_SHOWN_FOR, value).apply()
+    }
+
+    fun getInstallResult(): String? = prefs.getString(KEY_UPDATE_INSTALL_RESULT, null)
+
+    /** `commit()`: receiver có thể bị kill ngay sau khi trả về. */
+    fun setInstallResult(record: String) {
+        prefs.edit().putString(KEY_UPDATE_INSTALL_RESULT, record).commit()
+    }
+
+    fun clearInstallResult() {
+        prefs.edit().remove(KEY_UPDATE_INSTALL_RESULT).commit()
+    }
+
+    fun getPendingAction(): String? = prefs.getString(KEY_UPDATE_PENDING_ACTION, null)
+
+    fun setPendingAction(action: String?) {
+        prefs.edit().putString(KEY_UPDATE_PENDING_ACTION, action).commit()
+    }
 
     fun resetTrafficCounters(currentRx: Long, currentTx: Long) {
         prefs.edit()

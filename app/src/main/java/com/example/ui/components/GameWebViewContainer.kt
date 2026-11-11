@@ -25,19 +25,26 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.model.CharacterStats
 import com.example.model.TabLifecycleState
+import com.example.model.TabLimits
 import com.example.model.ViewLayoutMode
 import com.example.webview.GameTabManager
 
+/**
+ * Ô hiển thị của một tab. `onSelectTab` là lambda TƯƠI: composition gán lại mỗi lượt
+ * `update`, nên ô không giữ tham chiếu tới callback của lần composition đầu.
+ */
 class TabCardViewHolder(
     val root: LinearLayout,
     val idleOverlay: LinearLayout,
     val idleOpenBtn: Button,
-    val idleTitle: TextView
+    val idleTitle: TextView,
+    var onSelectTab: (Int) -> Unit
 )
 
 @Composable
 fun GameWebViewContainer(
     tabManager: GameTabManager,
+    tabCount: Int,
     characterStatsList: List<CharacterStats>,
     selectedTabIndex: Int,
     layoutMode: ViewLayoutMode,
@@ -48,16 +55,30 @@ fun GameWebViewContainer(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    
-    // THUỐC ĐẶC TRỊ SỐ 2: Cấp Window Token thực tế (Activity) cho WebView 
+
+    // THUỐC ĐẶC TRỊ SỐ 2: Cấp Window Token thực tế (Activity) cho WebView
     // để Android OS cho phép tạo cửa sổ Popup <select> thay vì bị crash/đóng lập tức.
     tabManager.updateActivityContext(context)
 
-    // Giữ nguyên thực thể (Instance) của 4 TabContainerView
-    val tabCardHolders = remember {
-        Array(4) { i ->
-            createTabCardViewHolder(context, i, tabManager, onSelectTab)
-        }
+    // =========================================================================
+    // CACHE HOLDER CHỈ-TĂNG, TẠO LAZY, KHÔNG BAO GIỜ BỎ (docs/DESIGN-TAB-COUNT.md §5)
+    //
+    // Vì sao không tạo lại holder khi đổi N: createTabCardViewHolder gọi getOrCreateWebView
+    // và registerSlot. Tạo lại sẽ detach/attach lại WebView ĐANG SỐNG và ghi đè attacher
+    // (đẻ ra hai contentContainer trong cây) ⇒ tab mất DOM, phải đăng nhập lại.
+    //
+    // Vì sao chỉ-tăng là an toàn: holder của index i đăng ký đúng một attacher cho i,
+    // attacher sống bằng holder, nên khi renderer chết và getOrCreateWebView tạo lại thì
+    // vẫn có slot để gắn. Bỏ holder = phá phục hồi renderer của index đó.
+    // Holder rỗi chỉ là một LinearLayout không có WebView con.
+    //
+    // Vì sao lazy: tạo trước 8 holder là tạo 8 renderer ngay lần composition đầu,
+    // ~2.4 GB cho người dùng chọn 1 tab.
+    // =========================================================================
+    val holders = remember { HashMap<Int, TabCardViewHolder>() }
+
+    fun holderFor(index: Int): TabCardViewHolder = holders.getOrPut(index) {
+        createTabCardViewHolder(context, index, tabManager)
     }
 
     Column(
@@ -78,130 +99,109 @@ fun GameWebViewContainer(
                 }
             },
             update = { rootLayout ->
-                // =========================================================================
-                // QUY CHUẨN 2: CHUYỂN ĐỔI CHẾ ĐỘ 4 CỘT DỌC (1x4), LƯỚI 2x2, VÀ 1 TAB TOÀN MÀN
-                // Chỉ tháo và gắn lại view KHI CHẾ ĐỘ HIỂN THỊ HOẶC TAB ĐƯỢC CHỌN THAY ĐỔI.
-                // Tránh gọi removeAllViews() liên tục gây giật / nháy màn hình!
-                // =========================================================================
-                val currentLayoutKey = "${layoutMode.name}_${if (layoutMode == ViewLayoutMode.SINGLE_TAB) selectedTabIndex else -1}"
+                val safeCount = tabCount.coerceIn(0, TabLimits.SLOT_COUNT)
+                val keySelected = if (layoutMode == ViewLayoutMode.SINGLE_TAB) {
+                    selectedTabIndex.coerceIn(0, (safeCount - 1).coerceAtLeast(0))
+                } else {
+                    -1
+                }
+                val currentLayoutKey = "${layoutMode.name}:${safeCount}:${keySelected}"
                 val lastLayoutKey = rootLayout.tag as? String
+
+                // Holder nào được ĐẶT trên màn hình ở chế độ hiện tại. SINGLE_TAB chỉ cần
+                // một ô: materialise cả N là dựng N khung view vô ích.
+                val visibleIndices: List<Int> = if (layoutMode == ViewLayoutMode.SINGLE_TAB) {
+                    if (safeCount == 0) emptyList() else listOf(keySelected)
+                } else {
+                    (0 until safeCount).toList()
+                }
+
+                // Lambda tươi: gán lại MỖI lượt update (kể cả khi bố cục không đổi) từ tham số
+                // hiện tại, để ô không giữ tham chiếu tới callback của lần composition cũ.
+                for (index in visibleIndices) {
+                    holderFor(index).onSelectTab = onSelectTab
+                }
 
                 if (lastLayoutKey != currentLayoutKey || rootLayout.childCount == 0) {
                     rootLayout.tag = currentLayoutKey
 
-                    for (holder in tabCardHolders) {
+                    // Detach MỌI holder đã cache trước khi dựng lại — kể cả holder không còn
+                    // trong layout mới. Đây là fix cho "giảm N còn ô cũ trên màn hình".
+                    for (holder in holders.values) {
                         (holder.root.parent as? ViewGroup)?.removeView(holder.root)
                     }
                     rootLayout.removeAllViews()
 
+                    // Bố cục do TabLayoutPlan quyết định (unit test kiểm được): N ≤ 4 ở chế độ
+                    // 4 Dọc BẮT BUỘC đi nhánh legacy, không đi builder tổng quát.
+                    val plan = TabLayoutPlan.planFor(layoutMode, safeCount)
+
                     when (layoutMode) {
                         ViewLayoutMode.FOUR_COLUMNS -> {
-                            // Chế độ 1: 4 Cột Dọc (1 Hàng x 4 Cột song song)
-                            rootLayout.orientation = LinearLayout.HORIZONTAL
-                            rootLayout.weightSum = 4f
+                            if (plan.useLegacyRow) {
+                                // ===== NHÁNH LEGACY — NGUYÊN VĂN, PIXEL-IDENTICAL =====
+                                // N ≤ 4 ở chế độ 4 Dọc: 1 hàng × N cột, weightSum = N,
+                                // leftMargin = 3 RAW PX (không phải 3.dp).
+                                // Ở 360dp/density 3: (360 − 3)/4 = 89.25dp mỗi ô — đúng
+                                // giá trị hôm nay.
+                                rootLayout.orientation = LinearLayout.HORIZONTAL
+                                rootLayout.weightSum = safeCount.toFloat()
 
-                            for (i in 0..3) {
-                                val holder = tabCardHolders[i]
-                                val params = LinearLayout.LayoutParams(
-                                    0,
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    1f
-                                ).apply {
-                                    if (i > 0) leftMargin = 3
+                                for (i in 0 until safeCount) {
+                                    val holder = holderFor(i)
+                                    val params = LinearLayout.LayoutParams(
+                                        0,
+                                        ViewGroup.LayoutParams.MATCH_PARENT,
+                                        1f
+                                    ).apply {
+                                        if (i > 0) leftMargin = TabLayoutPlan.GAP_PX
+                                    }
+                                    holder.root.layoutParams = params
+                                    rootLayout.addView(holder.root)
                                 }
-                                holder.root.layoutParams = params
-                                rootLayout.addView(holder.root)
+                            } else {
+                                buildGrid(rootLayout, safeCount, plan.cols, plan.rows) { index ->
+                                    holderFor(index)
+                                }
                             }
                         }
 
                         ViewLayoutMode.TWO_BY_TWO -> {
-                            // Chế độ 2: Lưới 2x2 (2 Hàng ngang x 2 Cột)
-                            rootLayout.orientation = LinearLayout.VERTICAL
-                            rootLayout.weightSum = 2f
-
-                            val rowTop = LinearLayout(context).apply {
-                                orientation = LinearLayout.HORIZONTAL
-                                weightSum = 2f
-                                layoutParams = LinearLayout.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    0,
-                                    1f
-                                )
+                            // N == 4: builder tổng quát tái tạo đúng cây 2×2 hôm nay
+                            // (root VERTICAL weightSum=2, hai hàng HORIZONTAL weightSum=2,
+                            //  hàng 2 topMargin=3, cột 2 leftMargin=3).
+                            buildGrid(rootLayout, safeCount, plan.cols, plan.rows) { index ->
+                                holderFor(index)
                             }
-
-                            val rowBottom = LinearLayout(context).apply {
-                                orientation = LinearLayout.HORIZONTAL
-                                weightSum = 2f
-                                layoutParams = LinearLayout.LayoutParams(
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    0,
-                                    1f
-                                ).apply {
-                                    topMargin = 3
-                                }
-                            }
-
-                            // Hàng trên: Tab 0 & Tab 1
-                            for (i in 0..1) {
-                                val holder = tabCardHolders[i]
-                                val params = LinearLayout.LayoutParams(
-                                    0,
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    1f
-                                ).apply {
-                                    if (i == 1) leftMargin = 3
-                                }
-                                holder.root.layoutParams = params
-                                rowTop.addView(holder.root)
-                            }
-
-                            // Hàng dưới: Tab 2 & Tab 3
-                            for (i in 2..3) {
-                                val holder = tabCardHolders[i]
-                                val params = LinearLayout.LayoutParams(
-                                    0,
-                                    ViewGroup.LayoutParams.MATCH_PARENT,
-                                    1f
-                                ).apply {
-                                    if (i == 3) leftMargin = 3
-                                }
-                                holder.root.layoutParams = params
-                                rowBottom.addView(holder.root)
-                            }
-
-                            rootLayout.addView(rowTop)
-                            rootLayout.addView(rowBottom)
                         }
 
                         ViewLayoutMode.SINGLE_TAB -> {
                             // Chế độ 3: 1 Tab (Toàn màn hình) - Hiển thị duy nhất tab được chọn
                             rootLayout.orientation = LinearLayout.VERTICAL
                             rootLayout.weightSum = 1f
-
-                            val activeIndex = selectedTabIndex.coerceIn(0, 3)
-                            val holder = tabCardHolders[activeIndex]
-                            val params = LinearLayout.LayoutParams(
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                ViewGroup.LayoutParams.MATCH_PARENT,
-                                1f
-                            )
-                            holder.root.layoutParams = params
-                            rootLayout.addView(holder.root)
+                            if (safeCount > 0) {
+                                val holder = holderFor(keySelected)
+                                val params = LinearLayout.LayoutParams(
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    ViewGroup.LayoutParams.MATCH_PARENT,
+                                    1f
+                                )
+                                holder.root.layoutParams = params
+                                rootLayout.addView(holder.root)
+                            }
                         }
                     }
 
-                    // Căn chỉnh lại Viewport mà không reload trang (chỉ gọi khi đổi chế độ)
+                    // Căn chỉnh lại Viewport mà không reload trang (chỉ gọi khi đổi layout)
                     tabManager.adjustAllViewports()
                 }
 
-                // Cập nhật trạng thái hiển thị của từng Tab và Idle Overlay trực tiếp tại chỗ (không remove/add View)
-                // (Mini-header 28dp đã bỏ: trạng thái tab do dải 32dp ở đáy báo.
-                //  Khối idle overlay bên dưới giữ nguyên — nút [▶ MỞ TAB N] vẫn tại chỗ.)
-                for (i in 0..3) {
-                    val holder = tabCardHolders[i]
+                // Cập nhật trạng thái hiển thị của từng ô và Idle Overlay trực tiếp tại chỗ
+                // (không remove/add View). Mini-header 28dp đã bỏ: trạng thái tab do dải 32dp báo.
+                for (i in visibleIndices) {
+                    val holder = holderFor(i)
                     val stats = characterStatsList.getOrElse(i) { CharacterStats(tabIndex = i) }
 
-                    // Hiển thị màn hình chờ (Idle) hay WebView
                     if (stats.state == TabLifecycleState.IDLE || stats.state == TabLifecycleState.OFFLINE) {
                         if (holder.idleOverlay.visibility != View.VISIBLE) {
                             holder.idleOverlay.visibility = View.VISIBLE
@@ -239,6 +239,7 @@ fun GameWebViewContainer(
         // vùng chạm của game; WebView giữ đúng bề rộng và nhận trọn phần còn lại.
         GameStatusStrip(
             tabManager = tabManager,
+            tabCount = tabCount,
             characterStatsList = characterStatsList,
             selectedTabIndex = selectedTabIndex,
             isDownloading = isDownloading,
@@ -249,11 +250,63 @@ fun GameWebViewContainer(
     }
 }
 
+/**
+ * Builder tổng quát cho rows ≥ 2 (và cho 2x2).
+ *
+ * Bất biến: `weightSum` luôn = `cols`, KHÔNG BAO GIỜ = số con thực tế. Hàng cuối thiếu thì
+ * để trống bên phải, không kéo giãn — nếu kéo giãn, ô đó có bề rộng CSS khác anh em, rơi
+ * vào nhánh media-query khác và auto-login CSS lệch.
+ *
+ * Gap giữ RAW PIXEL (leftMargin/topMargin = 3), không đổi sang 3.dp: đổi sẽ làm N=4 từ
+ * 89.25dp xuống 87dp ở density 3.
+ */
+private fun buildGrid(
+    root: LinearLayout,
+    count: Int,
+    cols: Int,
+    rows: Int,
+    holderFor: (Int) -> TabCardViewHolder
+) {
+    root.orientation = LinearLayout.VERTICAL
+    root.weightSum = rows.toFloat()
+
+    for (r in 0 until rows) {
+        val row = LinearLayout(root.context).apply {
+            orientation = LinearLayout.HORIZONTAL
+            weightSum = cols.toFloat()
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            ).apply {
+                if (r > 0) topMargin = TabLayoutPlan.GAP_PX
+            }
+        }
+
+        val start = r * cols
+        val end = minOf(count - 1, (r + 1) * cols - 1)
+        for (i in start..end) {
+            val holder = holderFor(i)
+            val columnInRow = i - start
+            val params = LinearLayout.LayoutParams(
+                0,
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                1f
+            ).apply {
+                if (columnInRow > 0) leftMargin = TabLayoutPlan.GAP_PX
+            }
+            holder.root.layoutParams = params
+            row.addView(holder.root)
+        }
+
+        root.addView(row)
+    }
+}
+
 private fun createTabCardViewHolder(
     context: Context,
     tabIndex: Int,
-    tabManager: GameTabManager,
-    onSelectTab: (Int) -> Unit
+    tabManager: GameTabManager
 ): TabCardViewHolder {
     val card = LinearLayout(context).apply {
         orientation = LinearLayout.VERTICAL
@@ -283,8 +336,8 @@ private fun createTabCardViewHolder(
     )
     contentContainer.addView(webView)
 
-    // Ô hiển thị này chỉ được tạo 1 lần (remember), nên khi GameTabManager phải tạo lại WebView
-    // (bị thu hồi RAM / đổi Cụm) UI phải tự gắn WebView mới vào đúng ô.
+    // Ô hiển thị này chỉ được tạo 1 lần (cache chỉ-tăng), nên khi GameTabManager phải tạo lại
+    // WebView (bị thu hồi RAM / đổi Cụm) UI phải tự gắn WebView mới vào đúng ô.
     // Chèn ở index 0 để không đè lên idleOverlay đang nằm phía trên.
     var attachedWebView: WebView = webView
     tabManager.registerSlot(tabIndex) { newWebView ->
@@ -325,6 +378,9 @@ private fun createTabCardViewHolder(
     }
     idleOverlay.addView(idleTitle)
 
+    // Holder chưa tồn tại lúc dựng nút: giữ tham chiếu nullable rồi gán trước khi return.
+    var holderRef: TabCardViewHolder? = null
+
     val idleOpenBtn = Button(context).apply {
         layoutParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -343,7 +399,7 @@ private fun createTabCardViewHolder(
         setTextColor(AndroidColor.WHITE)
         setBackgroundColor(AndroidColor.parseColor("#15803D"))
         setOnClickListener {
-            onSelectTab(tabIndex)
+            holderRef?.onSelectTab?.invoke(tabIndex)
             tabManager.openSingleTab(tabIndex)
         }
     }
@@ -356,6 +412,7 @@ private fun createTabCardViewHolder(
         root = card,
         idleOverlay = idleOverlay,
         idleOpenBtn = idleOpenBtn,
-        idleTitle = idleTitle
-    )
+        idleTitle = idleTitle,
+        onSelectTab = {}
+    ).also { holderRef = it }
 }

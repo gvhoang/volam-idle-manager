@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -31,9 +32,20 @@ import androidx.compose.ui.graphics.Color
 import android.content.res.Configuration
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Text
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.example.model.ViewLayoutMode
 import com.example.ui.MainViewModel
 import com.example.ui.components.AccountDialog
@@ -44,6 +56,10 @@ import com.example.ui.components.GameWebViewContainer
 import com.example.ui.components.OledBlackScreen
 import com.example.ui.components.SidebarView
 import com.example.ui.theme.MyApplicationTheme
+import com.example.update.AppVisibility
+import com.example.update.UpdateUiState
+import kotlinx.coroutines.delay
+import androidx.compose.foundation.border
 
 class MainActivity : ComponentActivity() {
 
@@ -72,7 +88,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        // AppOp "Cài đặt ứng dụng không rõ nguồn gốc" không có callback kết quả: kiểm lại
+        // ở đây. KHÔNG tự cài — chỉ đưa UI về trạng thái bấm được "Cài đặt".
+        viewModel.onActivityResumed()
         viewModel.tabManager.onAppForegrounded()
+    }
+
+    override fun onStart() {
+        super.onStart()
+        // PackageInstaller chỉ được commit từ Activity đang STARTED (Android 10+ chặn BAL),
+        // và STATUS_PENDING_USER_ACTION chỉ được startActivity khi app visible.
+        AppVisibility.onActivityStarted()
     }
 
     override fun onPause() {
@@ -82,6 +108,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
+        AppVisibility.onActivityStopped()
         viewModel.tabManager.onAppBackgrounded()
     }
 
@@ -113,6 +140,8 @@ fun MainScreen(
     val isBlackScreenSynced by viewModel.isBlackScreenSynced.collectAsState()
     val autoConfig by viewModel.autoConfig.collectAsState()
     val isAutoDialogVisible by viewModel.isAutoDialogVisible.collectAsState()
+    val tabCount by viewModel.tabCount.collectAsState()
+    val tabCountWarnShown by viewModel.tabCountWarnShown.collectAsState()
 
     // Bảng điều khiển nhanh: mọi control từng nằm ở header 44dp + mini-header 28dp đều ở đây.
     val isControlSheetOpen by viewModel.isControlSheetOpen.collectAsState()
@@ -120,6 +149,39 @@ fun MainScreen(
     val desktopModeStates by viewModel.desktopModeStates.collectAsState()
     val sheetTabStats = characterStatsList.getOrElse(controlSheetTabIndex) {
         com.example.model.CharacterStats(tabIndex = controlSheetTabIndex)
+    }
+
+    // ===== Tự động cập nhật: banner nhắc không chặn (32dp) =====
+    // Chỉ nhắc khi CÓ bản mới và tối đa 1 lần / versionCode. Ẩn khi Treo máy (màn hình cố ý
+    // đen 0.01), không dialog, không cướp focus, tự ẩn sau 8s.
+    val updateState by viewModel.updateState.collectAsState()
+    val context = LocalContext.current
+    var updateBanner by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(updateState, isSleepMode) {
+        if (isSleepMode) {
+            updateBanner = null
+            return@LaunchedEffect
+        }
+        val state = updateState
+        if (state is UpdateUiState.Available && viewModel.shouldShowUpdateBanner()) {
+            viewModel.markUpdateBannerShown()
+            updateBanner = context.getString(R.string.update_banner_available, state.versionName)
+        }
+    }
+
+    // Thông điệp "đã cập nhật lên X" của process trước (kết quả cài tới muộn).
+    LaunchedEffect(Unit) {
+        viewModel.consumeLaunchMessage()?.let { message -> updateBanner = message }
+    }
+
+    // Hẹn giờ tách riêng, key theo CHÍNH nội dung banner: nếu một hiệu ứng khác đổi banner
+    // thì đồng hồ cũ bị huỷ và đặt lại — không có đường nào để banner kẹt vĩnh viễn.
+    LaunchedEffect(updateBanner) {
+        if (updateBanner != null) {
+            delay(8_000)
+            updateBanner = null
+        }
     }
 
     // Handle brightness adjustments when Sleep Mode toggles
@@ -170,6 +232,7 @@ fun MainScreen(
                     ) {
                         GameWebViewContainer(
                             tabManager = viewModel.tabManager,
+                            tabCount = tabCount,
                             characterStatsList = characterStatsList,
                             selectedTabIndex = selectedTabIndex,
                             layoutMode = layoutMode,
@@ -195,19 +258,17 @@ fun MainScreen(
                             // Bảng điều khiển (Sidebar) hiển thị đè lên bên trái với bề rộng 320dp
                             SidebarView(
                                 isMasterAutoRunning = isMasterAutoRunning,
+                                tabCount = tabCount,
                                 characterStatsList = characterStatsList,
                                 selectedTabIndex = selectedTabIndex,
                                 onSelectTab = { viewModel.selectTab(it) },
                                 onLoginAll = { viewModel.onMasterLoginAllClicked() },
                                 onStopAll = { viewModel.onMasterStopAllClicked() },
                                 onEditAccount = { viewModel.startEditingAccount(it) },
-                                onSyncAutoMode = { viewModel.syncAutoMode(it) },
                                 onToggleSidebar = { viewModel.toggleSidebar() },
                                 getAccount = { viewModel.prefs.getAccount(it) },
                                 isBlackScreenSynced = isBlackScreenSynced,
                                 onSyncBlackScreen = { viewModel.syncBlackScreen(it) },
-                                isAutoPilotOn = autoConfig.on,
-                                onOpenAutoConfig = { viewModel.openAutoConfigDialog() },
                                 modifier = Modifier
                                     .fillMaxHeight()
                                     .width(320.dp)
@@ -225,19 +286,17 @@ fun MainScreen(
                         if (isSidebarVisible) {
                             SidebarView(
                                 isMasterAutoRunning = isMasterAutoRunning,
+                                tabCount = tabCount,
                                 characterStatsList = characterStatsList,
                                 selectedTabIndex = selectedTabIndex,
                                 onSelectTab = { viewModel.selectTab(it) },
                                 onLoginAll = { viewModel.onMasterLoginAllClicked() },
                                 onStopAll = { viewModel.onMasterStopAllClicked() },
                                 onEditAccount = { viewModel.startEditingAccount(it) },
-                                onSyncAutoMode = { viewModel.syncAutoMode(it) },
                                 onToggleSidebar = { viewModel.toggleSidebar() },
                                 getAccount = { viewModel.prefs.getAccount(it) },
                                 isBlackScreenSynced = isBlackScreenSynced,
                                 onSyncBlackScreen = { viewModel.syncBlackScreen(it) },
-                                isAutoPilotOn = autoConfig.on,
-                                onOpenAutoConfig = { viewModel.openAutoConfigDialog() },
                                 modifier = Modifier
                                     .width(265.dp)
                                     .windowInsetsPadding(
@@ -248,6 +307,7 @@ fun MainScreen(
 
                         GameWebViewContainer(
                             tabManager = viewModel.tabManager,
+                            tabCount = tabCount,
                             characterStatsList = characterStatsList,
                             selectedTabIndex = selectedTabIndex,
                             layoutMode = layoutMode,
@@ -263,6 +323,38 @@ fun MainScreen(
                                 .fillMaxHeight()
                         )
                     }
+                }
+            }
+
+            // Banner cập nhật: overlay 32dp ở ĐỈNH, không đẩy WebView xuống (không reflow HUD).
+            updateBanner?.takeIf { !isSleepMode }?.let { text ->
+                val bannerShape = RoundedCornerShape(6.dp)
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .padding(start = 8.dp, end = 8.dp, top = 6.dp)
+                        .fillMaxWidth()
+                        .height(32.dp)
+                        .clip(bannerShape)
+                        .background(Color(0xFF0F172A))
+                        .border(1.dp, Color(0xFF38BDF8), bannerShape)
+                        .clickable {
+                            viewModel.tabManager.markUiInteraction()
+                            updateBanner = null
+                            viewModel.openControlSheet(selectedTabIndex)
+                        }
+                        .padding(horizontal = 10.dp)
+                        .testTag("update_banner"),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    Text(
+                        text = text,
+                        color = Color(0xFFE2E8F0),
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
                 }
             }
 
@@ -292,6 +384,34 @@ fun MainScreen(
                     viewModel.toggleSidebar()
                 },
                 onResetNetworkStats = { viewModel.resetNetworkCounters() },
+                onSyncAutoMode = { viewModel.syncAutoMode(it) },
+                isAutoPilotOn = autoConfig.on,
+                onOpenAutoConfig = {
+                    // Drawer nằm dưới sheet: đóng sheet trước để hộp thoại không bị che.
+                    viewModel.dismissControlSheet()
+                    viewModel.openAutoConfigDialog()
+                },
+                tabCount = tabCount,
+                maxTabCount = viewModel.maxTabCount,
+                isLowRam = viewModel.isLowRam,
+                tabCountWarnShown = tabCountWarnShown,
+                hasBusyTabsInRange = { from, toExclusive ->
+                    viewModel.hasBusyTabsInRange(from, toExclusive)
+                },
+                onSetTabCount = { viewModel.setTabCount(it) },
+                onMarkTabCountWarned = { viewModel.markTabCountWarned() },
+                appVersionName = viewModel.appVersionName,
+                updateState = updateState,
+                onCheckUpdate = { viewModel.checkForUpdate() },
+                onStartDownload = { viewModel.startUpdateDownload() },
+                onInstallUpdate = { viewModel.installUpdate() },
+                onOpenReleases = {
+                    val open = android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        android.net.Uri.parse(viewModel.releasesPageUrl())
+                    )
+                    runCatching { context.startActivity(open) }
+                },
                 onDismiss = { viewModel.dismissControlSheet() },
                 onInteract = { viewModel.tabManager.markUiInteraction() }
             )
@@ -316,6 +436,7 @@ fun MainScreen(
             if (isAutoDialogVisible) {
                 AutoConfigDialog(
                     config = autoConfig,
+                    tabCount = tabCount,
                     onSave = { updated -> viewModel.saveAutoConfig(updated) },
                     onResetCounters = { viewModel.resetAutoDailyCounters() },
                     onDismiss = { viewModel.dismissAutoConfigDialog() }
