@@ -34,7 +34,7 @@
 |---|---|---|
 | APK lưu hành là bản debug, ký `debug.keystore`, `debuggable=true` | Ký bằng khoá release thật; `isDebuggable = false` | `apksigner verify --print-certs` → `CN=Vo Lam Idle Manager`; `dumpsys package` → `flags=0x0`; manifest binary không còn attribute `debuggable` |
 | `isMinifyEnabled = false` | Bật R8 + `shrinkResources` | APK 22.713.334 → 2.878.060 byte; app vẫn chạy đủ 4 tab trên máy thật |
-| Khoá ký nằm rải rác, quyền đọc cho mọi tài khoản máy | ACL chỉ chủ sở hữu; bản sao khác ổ; mật khẩu tách khỏi tệp khoá | `icacls` trên cả ba tệp: chỉ `chu so huu`, không còn `BUILTIN\Users`/`Authenticated Users` |
+| Khoá ký nằm rải rác, quyền đọc cho mọi tài khoản máy | ACL chỉ chủ sở hữu; bản sao khác ổ; mật khẩu tách khỏi tệp khoá | `icacls` trên cả ba tệp: chỉ còn chủ sở hữu, không còn `BUILTIN\Users`/`Authenticated Users` |
 
 ## Đã tắt đúng (không cần xử lý)
 
@@ -129,11 +129,12 @@ Fingerprint trên là thông tin **công khai** — nó nằm trong mọi bản 
 dữ liệu công khai. Công bố nó là an toàn; biến nó thành pin cứng trong app thì **không**, vì
 `ApkInspector` cố ý so với signer đang cài để còn xoay khoá theo lineage.
 
-Bố trí hiện tại:
+Bố trí hiện tại (đường dẫn tuyệt đối **không** ghi trong repo — repo công khai; chúng chỉ nằm
+trong file lưu cục bộ trên máy giữ khoá):
 
 - Bản đang dùng: trong repo, gitignored, ACL chỉ chủ sở hữu.
-- Bản sao: `o khac\` — **khác ổ vật lý** với bản đang dùng.
-- Mật khẩu: `tep mat khau cuc bo` — **tách khỏi cả hai tệp khoá**.
+- Bản sao: ở **ổ vật lý khác** với bản đang dùng.
+- Mật khẩu: file riêng, **tách khỏi cả hai tệp khoá**.
 - **Còn thiếu:** một bản offline (USB/ổ ngoài mã hoá). Chưa có thì rủi ro mất trộm/hỏng máy
   vẫn chưa được che.
 
