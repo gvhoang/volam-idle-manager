@@ -18,7 +18,7 @@ Chạy **1–8 tài khoản** webgame [Võ Lâm Idle](https://volamidle.pages.de
 >
 > 1. Mở từng tab trong bản 4.x, ghi lại **tài khoản, mật khẩu, URL tùy chỉnh** (nếu có) và cấu hình `🤖 Tự động` ra ngoài máy.
 > 2. Gỡ `Võ Lâm Idle` (Cài đặt → Ứng dụng → Gỡ cài đặt).
-> 3. Cài `app-release.apk` từ [Releases](https://github.com/gvhoang/volam-idle-manager/releases/tag/v5.0.0).
+> 3. Cài `volamidle-manager.apk` từ [Releases](https://github.com/gvhoang/volam-idle-manager/releases/tag/v5.0.0).
 > 4. Nhập lại tài khoản cho từng tab.
 >
 > Nút **Cập nhật** bên trong bản 4.1.0 sẽ báo *“Không cài được: bản cập nhật được ký bằng khóa khác với bản đang cài”*. Đó là hành vi đúng, không phải lỗi tải.
@@ -170,13 +170,13 @@ Android 13+ khai báo `POST_NOTIFICATIONS` nhưng app **không xin quyền runti
 
 ### Từ APK phát hành
 
-1. Vào [Releases](https://github.com/gvhoang/volam-idle-manager/releases/tag/v5.0.0), tải `app-release.apk`.
+1. Vào [Releases](https://github.com/gvhoang/volam-idle-manager/releases/tag/v5.0.0), tải `volamidle-manager.apk`.
 2. Kiểm tra toàn vẹn trước khi cài:
 
 ```bash
-sha256sum app-release.apk
+sha256sum volamidle-manager.apk
 # Windows
-certutil -hashfile app-release.apk SHA256
+certutil -hashfile volamidle-manager.apk SHA256
 ```
 
 Đối chiếu với digest công bố trong phần mô tả release. README không nhúng checksum vì build lại sẽ ra file khác.
@@ -184,7 +184,7 @@ certutil -hashfile app-release.apk SHA256
 3. Cài:
 
 ```bash
-adb install -r app-release.apk
+adb install -r volamidle-manager.apk
 # hoặc mở trực tiếp file APK trên máy và cho phép "Cài từ nguồn không xác định"
 ```
 
@@ -494,7 +494,7 @@ Cách xử lý: clone và build trong thư mục ASCII tuyệt đối, ví dụ 
 
 ## Quy trình phát hành
 
-Mỗi bản phát hành là một tag `vX.Y.Z` trên nhánh `main`, kèm asset `app-release.apk` và body release khai báo `versionCode: N` tường minh — app đọc con số này trước khi suy từ tag. Từ 5.0.0, `versionCode` theo công thức `major*10000 + minor*100 + patch`, nên `5.0.0` là `50000` và mọi bản sau phải lớn hơn bản trước. Bản phát hành phải được ký bằng đúng khóa `upload`; ký bằng khóa khác sẽ khiến mọi người dùng hiện tại không cài đè được.
+Mỗi bản phát hành là một tag `vX.Y.Z` trên nhánh `main`, kèm asset `volamidle-manager.apk` và body release khai báo `versionCode: N` tường minh — app đọc con số này trước khi suy từ tag. Từ 5.0.0, `versionCode` theo công thức `major*10000 + minor*100 + patch`, nên `5.0.0` là `50000` và mọi bản sau phải lớn hơn bản trước. Bản phát hành phải được ký bằng đúng khóa `upload`; ký bằng khóa khác sẽ khiến mọi người dùng hiện tại không cài đè được.
 
 Quy trình đầy đủ, gồm checklist trước khi tag, kiểm tra signer và phần body release: [`docs/RELEASE.md`](docs/RELEASE.md).
 

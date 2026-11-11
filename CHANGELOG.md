@@ -32,7 +32,7 @@ Từ 5.0.0, `versionCode` theo công thức `major * 10000 + minor * 100 + patch
 
 ### Ghi chú
 
-- APK phát hành: `app-release.apk`, tag `v5.0.0`.
+- APK phát hành: `volamidle-manager.apk` (asset của release), tag `v5.0.0`.
 - Chứng chỉ: DN `CN=Vo Lam Idle Manager, OU=Release Signing, O=Thien Co Labs, L=Ho Chi Minh City, ST=Ho Chi Minh, C=VN`, hiệu lực đến 2054-03-29, SHA-256 `3A:44:D8:D1:CA:33:4B:6E:49:7E:29:95:B9:70:5A:59:BE:B5:A2:AC:AE:25:BB:C3:1E:9F:72:16:BF:86:90:A7`.
 - Các vấn đề bảo mật của WebView và lưu trữ **chưa** được sửa trong bản này. Xem [`SECURITY.md`](SECURITY.md).
 
