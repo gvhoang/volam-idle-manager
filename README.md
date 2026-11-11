@@ -400,7 +400,7 @@ app/src/androidTest/java/com/example/    ExampleInstrumentedTest.kt (kiểm tra 
 | RAM | 4 tab cần ~1,0–1,3 GB cho riêng app + renderer; 8 tab đo được ~1,9 GB. Khuyến nghị 6–8 GB. Thiết bị ít RAM dễ bị hệ điều hành thu hồi renderer |
 | Mạng | Wi-Fi hoặc 4G ổn định; app giữ WifiLock nhưng không đảm bảo mạng của nhà mạng |
 | Bộ nhớ trong | APK debug + dữ liệu WebView; không có yêu cầu đặc biệt |
-| Quyền | 8 quyền khai báo: `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, `WAKE_LOCK`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `POST_NOTIFICATIONS`, `REQUEST_INSTALL_PACKAGES` |
+| Quyền | Manifest khai báo 8: `INTERNET`, `ACCESS_NETWORK_STATE`, `ACCESS_WIFI_STATE`, `WAKE_LOCK`, `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`, `POST_NOTIFICATIONS`, `REQUEST_INSTALL_PACKAGES`. APK merge thêm 2 từ thư viện: `READ_GSERVICES` và `DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (tự sinh) |
 | Tối ưu pin | Cần tắt tối ưu pin / bật “Không giới hạn” cho app, nếu không OEM sẽ giết foreground service |
 
 App bật `android:largeHeap="true"`, nhưng đây chỉ là gợi ý cho bộ nhớ heap của Java/Kotlin, không tăng RAM cho 4 tiến trình renderer.
