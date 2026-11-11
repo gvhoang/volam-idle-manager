@@ -629,9 +629,9 @@ Dự án bắt đầu như một công cụ cá nhân để giữ vài tài kho�
 Dự án tồn tại và tiếp tục được cải thiện nhờ những người đã bỏ thời gian thử, báo lỗi và chỉ ra chỗ sai — cảm ơn
 
 - **@vnlengkeng**
-- **@Thích Kim Kim Admin**
-- **@NOV Phát Ngôn Viên**
-- **@Mr Hoàng**
+- **@Thích Kim Kim**
+- **Admin @NOV **
+- **Phát Ngôn Viên: @Mr Hoàng**
 
 và toàn bộ cộng đồng **Võ Lâm Idle** trên Discord. Những vấn đề tưởng nhỏ — treo khung sau khi chat, tab kẹt “Đang vào”, dropdown không mở được, hay việc cần chạy quá 4 tab — đều được phát hiện từ việc dùng thật và thúc đẩy thành thay đổi trong các bản 4.x và 5.0.0.
 
