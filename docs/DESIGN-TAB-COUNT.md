@@ -264,3 +264,24 @@ Trên máy tham chiếu và một máy RAM thấp:
 3. `adb logcat -s chromium | grep -i "render process\|onRenderProcessGone\|oom"` — ghi mức N đầu tiên sinh `gone` trong 30 phút.
 4. Log `window.innerWidth` mỗi tab sau khi load — xác nhận CSS px = dp và tab nào rơi vào nhánh `<280px`.
 5. **Điều kiện ship 8:** 30 phút ở N=8, cả foreground và background, **0** `onRenderProcessGone` trên máy tham chiếu. Nếu fail → ship `HARD_MAX = 6` (giá trị ổn định đo được cuối cùng), hằng số chỉ nằm một chỗ.
+
+### Kết quả đo — 2026-11-11, v4.1.0
+
+Máy tham chiếu: LDPlayer 14, Android 14 x86_64, VM 6 nhân / 6 GB, `wm size 1080x2400`, `density 480`.
+
+| Mục | Kết quả |
+|---|---|
+| (2) Renderer = N | Đúng ở N = 4, 5, 6, 8 |
+| (5) Soak N=8 | 28 phút foreground + 8,5 phút background; 9 PID (app + 8 renderer) không đổi; 0 crash, **0** `onRenderProcessGone` |
+| RAM ở N=8 | RSS app 271 MB + 8 renderer 166–291 MB ≈ 1,9 GB; `MemAvailable` còn 4,3 GB |
+| CPU ở N=8 | App 100,3 % một nhân + 8 renderer ~119 % ⇒ ~220 %, tức ~55 % của VM 6 nhân (đo `top`: 416 % idle) |
+| Bố cục | N=4 một hàng 4 cột (nhánh cũ, không lệch); N=5 → 4+1; N=6 → 4+2; N=8 → 4×2. Hàng cuối căn trái, ô giữ nguyên 1/4 chiều ngang |
+| Dải trạng thái | > 4 tab chuyển `LazyRow`, `☰`/`⋯` ghim hai đầu, chiều cao 32dp không đổi |
+
+**Quyết định: ship `HARD_MAX = 8`.** Điều kiện (5) đạt trên máy tham chiếu.
+Chưa đo trên máy RAM thấp thật — bù lại, `isLowRamDevice` hạ trần xuống 4 và giá trị đọc từ
+`SharedPreferences` cũng bị kẹp, nên không có đường nào chạy 8 tab trên máy đó.
+
+Ghi chú khi đọc ảnh chụp ở N=8: vài ô trông như bị "zoom" là **tab chưa có tài khoản**, đang ở
+màn hình khởi động của game (chữ "Võ Lâm Idle … phiên bản 1041" cỡ lớn), không phải lỗi scale.
+Tab đã đăng nhập render HUD bình thường ở cùng bề rộng.
