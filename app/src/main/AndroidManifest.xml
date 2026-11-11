@@ -72,6 +72,7 @@
              dùng: gỡ hẳn khỏi manifest đã merge. -->
         <receiver
             android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            tools:ignore="MissingClass"
             tools:node="remove" />
     </application>
 
