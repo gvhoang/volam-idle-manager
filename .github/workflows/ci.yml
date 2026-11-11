@@ -36,8 +36,13 @@ jobs:
           distribution: temurin
           java-version: "21"
 
+      # `packages` mặc định của action là "tools platform-tools"; package `tools` đã bị
+      # Google bỏ khỏi repository nên bước này fail với "Failed to find package 'tools'".
+      # Chỉ xin platform-tools, phần còn lại cài bằng sdkmanager ở bước dưới.
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: "platform-tools"
 
       - name: Install SDK platform and build-tools
         run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
