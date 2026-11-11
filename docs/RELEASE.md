@@ -154,6 +154,19 @@ bắt buộc gỡ cài (xem §9).
 - Kiểm tra khôi phục mỗi năm một lần: ký thử một APK rỗng bằng bản sao lưu và so
   fingerprint với giá trị ở §3.1.
 
+**Vị trí thực tế (2026-11-11, bản 5.0.0):**
+
+| Vai trò | Đường dẫn |
+|---|---|
+| Bản đang dùng | `volamidle-release.p12` (gitignored, ACL chỉ chủ sở hữu) |
+| Mật khẩu | `tep mat khau cuc bo` (ACL chỉ chủ sở hữu; **tách** khỏi cả hai tệp khoá) |
+| Bản sao khác ổ | `ban sao o o khac` + `HUONG-DAN.txt` (không chứa mật khẩu) |
+| Bản offline | **CHƯA CÓ — cần bổ sung** (USB mã hoá) |
+
+Đổi mật khẩu thì phải đổi đồng thời ở ba chỗ: tệp `.p12`, `keystore.properties`, và
+`MAT-KHAU.txt`; sau đó chạy `apksigner verify --print-certs` trên một bản build để chắc chắn
+khoá vẫn đọc được.
+
 ### 3.5 CI không bao giờ cần khóa
 
 `.github/workflows/ci.yml` chỉ chạy test và lint. Nó không build release, không ký, và
