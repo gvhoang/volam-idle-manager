@@ -11,36 +11,17 @@ import android.widget.Button
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.example.model.CharacterStats
 import com.example.model.TabLifecycleState
@@ -49,12 +30,6 @@ import com.example.webview.GameTabManager
 
 class TabCardViewHolder(
     val root: LinearLayout,
-    val titleText: TextView,
-    val statusDot: View,
-    val btnOpen: Button,
-    val btnPc: Button,
-    val btnReload: Button,
-    val btnStop: Button,
     val idleOverlay: LinearLayout,
     val idleOpenBtn: Button,
     val idleTitle: TextView
@@ -66,7 +41,10 @@ fun GameWebViewContainer(
     characterStatsList: List<CharacterStats>,
     selectedTabIndex: Int,
     layoutMode: ViewLayoutMode,
+    isDownloading: Boolean,
     onSelectTab: (Int) -> Unit,
+    onOpenControlSheet: (Int) -> Unit = {},
+    onOpenSidebar: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -88,67 +66,6 @@ fun GameWebViewContainer(
             .background(Color(0xFF090D14))
             .testTag("webview_game_container")
     ) {
-        // Thanh Tab điều hướng khi ở chế độ xem 1 Tab
-        if (layoutMode == ViewLayoutMode.SINGLE_TAB) {
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(36.dp)
-                    .testTag("single_tab_navigation_bar"),
-                color = Color(0xFF0F172A),
-                border = BorderStroke(1.dp, Color(0xFF1E293B))
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 6.dp, vertical = 3.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    (0..3).forEach { i ->
-                        val stats = characterStatsList.getOrElse(i) { CharacterStats(tabIndex = i) }
-                        val isSelected = (selectedTabIndex == i)
-                        Surface(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxHeight()
-                                .clickable { onSelectTab(i) }
-                                .testTag("single_tab_selector_chip_$i"),
-                            shape = RoundedCornerShape(4.dp),
-                            color = if (isSelected) Color(0xFF0284C7) else Color(0xFF1E293B),
-                            border = BorderStroke(1.dp, if (isSelected) Color(0xFF38BDF8) else Color(0xFF334155))
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .background(
-                                            color = if (stats.state == TabLifecycleState.IN_GAME) Color(0xFF10B981)
-                                            else if (stats.state == TabLifecycleState.LOGGING_IN) Color(0xFFF59E0B)
-                                            else Color(0xFF64748B),
-                                            shape = CircleShape
-                                        )
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Tab ${i + 1}" + if (stats.characterName.isNotBlank() && stats.characterName != "Chưa mở tab") ": ${stats.characterName}" else "",
-                                    color = if (isSelected) Color.White else Color(0xFF94A3B8),
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
         AndroidView(
             factory = { ctx ->
                 LinearLayout(ctx).apply {
@@ -278,24 +195,11 @@ fun GameWebViewContainer(
                 }
 
                 // Cập nhật trạng thái hiển thị của từng Tab và Idle Overlay trực tiếp tại chỗ (không remove/add View)
+                // (Mini-header 28dp đã bỏ: trạng thái tab do dải 32dp ở đáy báo.
+                //  Khối idle overlay bên dưới giữ nguyên — nút [▶ MỞ TAB N] vẫn tại chỗ.)
                 for (i in 0..3) {
                     val holder = tabCardHolders[i]
                     val stats = characterStatsList.getOrElse(i) { CharacterStats(tabIndex = i) }
-                    val isSelected = (selectedTabIndex == i)
-
-                    val newTitle = "Tab ${i + 1}: ${stats.characterName}"
-                    if (holder.titleText.text != newTitle) {
-                        holder.titleText.text = newTitle
-                    }
-                    holder.titleText.setTextColor(
-                        if (isSelected) AndroidColor.parseColor("#38BDF8") else AndroidColor.parseColor("#E2E8F0")
-                    )
-
-                    // Điểm báo trạng thái online/offline
-                    val dotColor = if (stats.state == TabLifecycleState.IN_GAME) AndroidColor.parseColor("#10B981")
-                        else if (stats.state == TabLifecycleState.LOGGING_IN) AndroidColor.parseColor("#F59E0B")
-                        else AndroidColor.parseColor("#64748B")
-                    holder.statusDot.setBackgroundColor(dotColor)
 
                     // Hiển thị màn hình chờ (Idle) hay WebView
                     if (stats.state == TabLifecycleState.IDLE || stats.state == TabLifecycleState.OFFLINE) {
@@ -329,6 +233,19 @@ fun GameWebViewContainer(
                 .fillMaxWidth()
                 .weight(1f)
         )
+
+        // Dải trạng thái 32dp: sibling của AndroidView, KHÔNG phải overlay.
+        // Là view Compose riêng nằm dưới WebView trong Column nên không bao giờ đè lên
+        // vùng chạm của game; WebView giữ đúng bề rộng và nhận trọn phần còn lại.
+        GameStatusStrip(
+            tabManager = tabManager,
+            characterStatsList = characterStatsList,
+            selectedTabIndex = selectedTabIndex,
+            isDownloading = isDownloading,
+            onSelectTab = onSelectTab,
+            onOpenSidebar = onOpenSidebar,
+            onOpenControlSheet = onOpenControlSheet
+        )
     }
 }
 
@@ -343,134 +260,7 @@ private fun createTabCardViewHolder(
         setBackgroundColor(AndroidColor.parseColor("#0F172A"))
     }
 
-    // Mini Header của Tab (Hỗ trợ vuốt ngang khi cột hẹp trên màn hình dọc)
     val density = context.resources.displayMetrics.density
-    val headerScrollView = android.widget.HorizontalScrollView(context).apply {
-        isFillViewport = true
-        isHorizontalScrollBarEnabled = false
-        layoutParams = LinearLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT,
-            (28 * density).toInt()
-        )
-        setBackgroundColor(AndroidColor.parseColor("#111827"))
-    }
-
-    val headerLayout = LinearLayout(context).apply {
-        orientation = LinearLayout.HORIZONTAL
-        gravity = Gravity.CENTER_VERTICAL
-        layoutParams = ViewGroup.LayoutParams(
-            ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.MATCH_PARENT
-        )
-        setBackgroundColor(AndroidColor.parseColor("#111827"))
-        val padH = (6 * density).toInt()
-        setPadding(padH, 0, padH, 0)
-        setOnClickListener { onSelectTab(tabIndex) }
-    }
-
-    val statusDot = View(context).apply {
-        val size = (8 * density).toInt()
-        layoutParams = LinearLayout.LayoutParams(size, size).apply {
-            rightMargin = (5 * density).toInt()
-        }
-        setBackgroundColor(AndroidColor.parseColor("#64748B"))
-    }
-    headerLayout.addView(statusDot)
-
-    val titleText = TextView(context).apply {
-        layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply {
-            rightMargin = (4 * density).toInt()
-        }
-        minWidth = (56 * density).toInt()
-        text = "Tab ${tabIndex + 1}"
-        setTextColor(AndroidColor.parseColor("#E2E8F0"))
-        textSize = 10f
-        typeface = Typeface.DEFAULT_BOLD
-        isSingleLine = true
-    }
-    headerLayout.addView(titleText)
-
-    val btnOpen = Button(context).apply {
-        layoutParams = LinearLayout.LayoutParams(
-            (42 * density).toInt(),
-            (22 * density).toInt()
-        ).apply {
-            rightMargin = (4 * density).toInt()
-        }
-        text = "▶ Mở"
-        textSize = 8.5f
-        isSingleLine = true
-        setTextColor(AndroidColor.WHITE)
-        setBackgroundColor(AndroidColor.parseColor("#16A34A"))
-        setPadding(0, 0, 0, 0)
-        setOnClickListener {
-            onSelectTab(tabIndex)
-            tabManager.openSingleTab(tabIndex)
-        }
-    }
-    headerLayout.addView(btnOpen)
-
-    val btnPc = Button(context).apply {
-        layoutParams = LinearLayout.LayoutParams(
-            (32 * density).toInt(),
-            (22 * density).toInt()
-        ).apply {
-            rightMargin = (4 * density).toInt()
-        }
-        text = "PC"
-        textSize = 9.5f
-        typeface = Typeface.DEFAULT_BOLD
-        isSingleLine = true
-        setTextColor(AndroidColor.WHITE)
-        setBackgroundColor(AndroidColor.parseColor("#4B5563")) // Mặc định Mobile (Xám)
-        setPadding(0, 0, 0, 0)
-        setOnClickListener {
-            val isPC = tabManager.toggleDesktopMode(tabIndex)
-            setBackgroundColor(if (isPC) AndroidColor.parseColor("#9333EA") else AndroidColor.parseColor("#4B5563"))
-        }
-    }
-    headerLayout.addView(btnPc)
-
-    val btnReload = Button(context).apply {
-        layoutParams = LinearLayout.LayoutParams(
-            (32 * density).toInt(),
-            (22 * density).toInt()
-        ).apply {
-            rightMargin = (4 * density).toInt()
-        }
-        text = "↻"
-        textSize = 10.5f
-        typeface = Typeface.DEFAULT_BOLD
-        isSingleLine = true
-        setTextColor(AndroidColor.WHITE)
-        setBackgroundColor(AndroidColor.parseColor("#3B82F6"))
-        setPadding(0, 0, 0, 0)
-        setOnClickListener {
-            val wv = tabManager.getOrCreateWebView(tabIndex)
-            wv.reload()
-        }
-    }
-    headerLayout.addView(btnReload)
-
-    val btnStop = Button(context).apply {
-        layoutParams = LinearLayout.LayoutParams(
-            (34 * density).toInt(),
-            (22 * density).toInt()
-        )
-        text = "⏹"
-        textSize = 8.5f
-        isSingleLine = true
-        setTextColor(AndroidColor.WHITE)
-        setBackgroundColor(AndroidColor.parseColor("#B91C1C"))
-        setPadding(0, 0, 0, 0)
-        setOnClickListener {
-            tabManager.stopSingleTab(tabIndex)
-        }
-    }
-    headerLayout.addView(btnStop)
-
-    headerScrollView.addView(headerLayout)
-    card.addView(headerScrollView)
 
     // Khung chứa WebView + Idle Overlay
     val contentContainer = FrameLayout(context).apply {
@@ -564,12 +354,6 @@ private fun createTabCardViewHolder(
 
     return TabCardViewHolder(
         root = card,
-        titleText = titleText,
-        statusDot = statusDot,
-        btnOpen = btnOpen,
-        btnPc = btnPc,
-        btnReload = btnReload,
-        btnStop = btnStop,
         idleOverlay = idleOverlay,
         idleOpenBtn = idleOpenBtn,
         idleTitle = idleTitle

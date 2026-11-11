@@ -9,12 +9,18 @@ import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -32,8 +38,9 @@ import com.example.model.ViewLayoutMode
 import com.example.ui.MainViewModel
 import com.example.ui.components.AccountDialog
 import com.example.ui.components.AutoConfigDialog
+import com.example.ui.components.ControlSheet
+import com.example.ui.components.hasDownloadTraffic
 import com.example.ui.components.GameWebViewContainer
-import com.example.ui.components.HeaderBar
 import com.example.ui.components.OledBlackScreen
 import com.example.ui.components.SidebarView
 import com.example.ui.theme.MyApplicationTheme
@@ -95,6 +102,9 @@ fun MainScreen(
     val characterStatsList by viewModel.characterStatsList.collectAsState()
     val selectedTabIndex by viewModel.selectedTabIndex.collectAsState()
     val networkData by viewModel.networkData.collectAsState()
+    // Ô ⋯ đổi màu theo lưu lượng tải về (§8). Truyền Boolean thay vì cả NetworkDataInfo để
+    // container không phải recompose mỗi 2 giây khi số byte đổi mà tốc độ vẫn bằng 0.
+    val isDownloading = hasDownloadTraffic(networkData.downloadSpeedFormatted)
     val fps by viewModel.fps.collectAsState()
     val isSleepMode by viewModel.isSleepMode.collectAsState()
     val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
@@ -104,15 +114,24 @@ fun MainScreen(
     val autoConfig by viewModel.autoConfig.collectAsState()
     val isAutoDialogVisible by viewModel.isAutoDialogVisible.collectAsState()
 
+    // Bảng điều khiển nhanh: mọi control từng nằm ở header 44dp + mini-header 28dp đều ở đây.
+    val isControlSheetOpen by viewModel.isControlSheetOpen.collectAsState()
+    val controlSheetTabIndex by viewModel.controlSheetTabIndex.collectAsState()
+    val desktopModeStates by viewModel.desktopModeStates.collectAsState()
+    val sheetTabStats = characterStatsList.getOrElse(controlSheetTabIndex) {
+        com.example.model.CharacterStats(tabIndex = controlSheetTabIndex)
+    }
+
     // Handle brightness adjustments when Sleep Mode toggles
     LaunchedEffect(isSleepMode) {
         onSetWindowBrightnessLow(isSleepMode)
     }
 
     // Back button handling
-    BackHandler(enabled = isSleepMode || editingAccount != null || isAutoDialogVisible || (isPortrait && isSidebarVisible)) {
+    BackHandler(enabled = isSleepMode || editingAccount != null || isAutoDialogVisible || isControlSheetOpen || (isPortrait && isSidebarVisible)) {
         when {
             isSleepMode -> viewModel.setSleepMode(false)
+            isControlSheetOpen -> viewModel.dismissControlSheet()
             editingAccount != null -> viewModel.dismissAccountDialog()
             isAutoDialogVisible -> viewModel.dismissAutoConfigDialog()
             isPortrait && isSidebarVisible -> viewModel.toggleSidebar()
@@ -122,29 +141,25 @@ fun MainScreen(
     Scaffold(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF090D14))
+            .background(Color(0xFF090D14)),
+        // Không để Scaffold tự chừa inset: dải 32dp ở đáy phải là thứ duy nhất báo
+        // chiều cao chrome, và nó tự lo phần nav inset của chính nó.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                // Header Bar (MODULE 3, 4, 5)
-                HeaderBar(
-                    isSidebarVisible = isSidebarVisible,
-                    onToggleSidebar = { viewModel.toggleSidebar() },
-                    networkData = networkData,
-                    onResetNetworkStats = { viewModel.resetNetworkCounters() },
-                    fps = fps,
-                    onToggleFps = { viewModel.toggleFps() },
-                    onActivateSleepMode = { viewModel.setSleepMode(true) },
-                    layoutMode = layoutMode,
-                    onChangeLayoutMode = { viewModel.setLayoutMode(it) },
-                    selectedTabIndex = selectedTabIndex,
-                    onSelectTab = { viewModel.selectTab(it) }
-                )
-
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .windowInsetsPadding(
+                        WindowInsets.safeDrawing.only(
+                            WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+                        )
+                    )
+            ) {
                 // Main Workspace: Tối ưu cho cả màn hình dọc (RedMagic 8 Pro, Vivo X100 Ultra) và màn ngang PC
                 if (isPortrait) {
                     // Màn hình dọc: GameWebView chiếm 100% toàn màn hình; Bảng điều khiển là Drawer trượt đè lên
@@ -158,7 +173,13 @@ fun MainScreen(
                             characterStatsList = characterStatsList,
                             selectedTabIndex = selectedTabIndex,
                             layoutMode = layoutMode,
+                            isDownloading = isDownloading,
                             onSelectTab = { viewModel.selectTab(it) },
+                            onOpenControlSheet = { viewModel.openControlSheet(it) },
+                            onOpenSidebar = {
+                                viewModel.tabManager.markUiInteraction()
+                                viewModel.toggleSidebar()
+                            },
                             modifier = Modifier.fillMaxSize()
                         )
 
@@ -217,7 +238,11 @@ fun MainScreen(
                                 onSyncBlackScreen = { viewModel.syncBlackScreen(it) },
                                 isAutoPilotOn = autoConfig.on,
                                 onOpenAutoConfig = { viewModel.openAutoConfigDialog() },
-                                modifier = Modifier.width(265.dp)
+                                modifier = Modifier
+                                    .width(265.dp)
+                                    .windowInsetsPadding(
+                                        WindowInsets.navigationBars.only(WindowInsetsSides.Bottom)
+                                    )
                             )
                         }
 
@@ -226,7 +251,13 @@ fun MainScreen(
                             characterStatsList = characterStatsList,
                             selectedTabIndex = selectedTabIndex,
                             layoutMode = layoutMode,
+                            isDownloading = isDownloading,
                             onSelectTab = { viewModel.selectTab(it) },
+                            onOpenControlSheet = { viewModel.openControlSheet(it) },
+                            onOpenSidebar = {
+                                viewModel.tabManager.markUiInteraction()
+                                viewModel.toggleSidebar()
+                            },
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
@@ -234,6 +265,36 @@ fun MainScreen(
                     }
                 }
             }
+
+            // Bảng điều khiển nhanh (overlay — KHÔNG đẩy WebView xuống).
+            // Đặt TRƯỚC OledBlackScreen để chế độ treo máy che lên trên; mở khoá quay lại sheet.
+            ControlSheet(
+                isOpen = isControlSheetOpen,
+                tabIndex = controlSheetTabIndex,
+                tabLabel = sheetTabStats.characterName,
+                layoutMode = layoutMode,
+                fps = fps,
+                isDesktopMode = desktopModeStates.getOrElse(controlSheetTabIndex) { false },
+                networkData = networkData,
+                onOpenTab = {
+                    viewModel.selectTab(controlSheetTabIndex)
+                    viewModel.tabManager.openSingleTab(controlSheetTabIndex)
+                },
+                onToggleDesktopMode = { viewModel.toggleDesktopMode(controlSheetTabIndex) },
+                onReloadTab = { viewModel.reloadTab(controlSheetTabIndex) },
+                onStopTab = { viewModel.stopSingleTab(controlSheetTabIndex) },
+                onChangeLayoutMode = { viewModel.setLayoutMode(it) },
+                onToggleFps = { viewModel.toggleFps() },
+                onActivateSleepMode = { viewModel.setSleepMode(true) },
+                onOpenSidebar = {
+                    // Drawer nằm dưới sheet trong cây view: đóng sheet trước rồi mới mở drawer.
+                    viewModel.dismissControlSheet()
+                    viewModel.toggleSidebar()
+                },
+                onResetNetworkStats = { viewModel.resetNetworkCounters() },
+                onDismiss = { viewModel.dismissControlSheet() },
+                onInteract = { viewModel.tabManager.markUiInteraction() }
+            )
 
             // MODULE 4: OLED Black Screen Overlay (Double tap to unlock)
             if (isSleepMode) {

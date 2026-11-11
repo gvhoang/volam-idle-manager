@@ -152,6 +152,24 @@ class GameTabManager(
         }
     }
 
+    /**
+     * Đánh dấu người dùng vừa chạm vào chrome của app (dải trạng thái, sheet, drawer).
+     *
+     * `lastTouchTimeMs` chỉ tự tiến khi sự kiện chạm đi qua `dispatchTouchEvent` của WebView.
+     * Chạm lên Compose chrome không bao giờ tới WebView, nên nếu thiếu hàm này thì:
+     * - vòng đăng nhập 850ms vẫn inject script (quét DOM + click tổng hợp) đúng lúc người dùng
+     *   đang bấm nút, và
+     * - watchdog 1200ms vẫn bấm "Chơi ở đây" / đóng `<select>` đang mở.
+     * Đó chính là lớp lỗi làm treo khung HUD ở 4.0.0. Đẩy mốc thời gian cho cả 4 tab để mọi
+     * vòng quét đều thấy "vừa có tương tác" và tự lùi lại 5 giây.
+     */
+    fun markUiInteraction() {
+        val now = System.currentTimeMillis()
+        for (i in 0..3) {
+            webViews[i]?.lastTouchTimeMs = now
+        }
+    }
+
     companion object {
         // Lỗi tạm thời: thử lại tối đa 3 lần, giãn cách tăng dần 2.5s -> 5s -> 7.5s
         private const val MAX_MAIN_FRAME_RETRY = 3

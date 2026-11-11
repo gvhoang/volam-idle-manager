@@ -37,7 +37,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSleepMode = MutableStateFlow(false)
     val isSleepMode: StateFlow<Boolean> = _isSleepMode.asStateFlow()
 
-    private val _isSidebarVisible = MutableStateFlow(true)
+    // Drawer mở mặc định ở bản cũ che 89% màn hình 360dp ngay lần đầu, đúng thứ thiết kế này
+    // đang cố loại bỏ. Mặc định đóng; mở bằng ô ☰ trên dải hoặc nút trong bảng điều khiển nhanh.
+    private val _isSidebarVisible = MutableStateFlow(false)
     val isSidebarVisible: StateFlow<Boolean> = _isSidebarVisible.asStateFlow()
 
     private val _layoutMode = MutableStateFlow(ViewLayoutMode.FOUR_COLUMNS)
@@ -59,6 +61,22 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     private val _isAutoDialogVisible = MutableStateFlow(false)
     val isAutoDialogVisible: StateFlow<Boolean> = _isAutoDialogVisible.asStateFlow()
+
+    // ===== Bảng điều khiển nhanh (bottom sheet) =====
+    // Nội dung 44dp header cũ (FPS, treo máy, chế độ xem, 4 nút per-tab, traffic, drawer)
+    // chuyển hết vào đây để chrome luôn hiện chỉ còn đúng dải 32dp ở đáy.
+    // `controlSheetTabIndex` là tab đích cho nhóm nút per-tab (▶ Mở / PC / ↻ / ⏹).
+    private val _isControlSheetOpen = MutableStateFlow(false)
+    val isControlSheetOpen: StateFlow<Boolean> = _isControlSheetOpen.asStateFlow()
+
+    private val _controlSheetTabIndex = MutableStateFlow(0)
+    val controlSheetTabIndex: StateFlow<Int> = _controlSheetTabIndex.asStateFlow()
+
+    // Trạng thái UA PC từng tab. GameTabManager.toggleDesktopMode() trả về trạng thái MỚI nên
+    // bản sao này luôn khớp với nguồn sự thật trong tabManager; nút PC trong sheet đọc từ đây
+    // thay vì tự suy ra từ màu nền nút như mini-header cũ.
+    private val _desktopModeStates = MutableStateFlow(List(4) { false })
+    val desktopModeStates: StateFlow<List<Boolean>> = _desktopModeStates.asStateFlow()
 
     val isSystemRunning: StateFlow<Boolean> = tabManager.isSystemRunning
     val isMasterAutoRunning: StateFlow<Boolean> = tabManager.isSystemRunning
@@ -163,6 +181,39 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     fun resetAutoDailyCounters() {
         tabManager.resetAutoDailyCounters()
+    }
+
+    // ===== Bảng điều khiển nhanh =====
+    fun openControlSheet(tabIndex: Int) {
+        // Một cửa duy nhất cho mọi đường mở sheet, nên chặn synthetic click luôn ở đây:
+        // mở sheet là một cú chạm chrome, không đi qua WebView nên lastTouchTimeMs không tự tiến.
+        tabManager.markUiInteraction()
+        _controlSheetTabIndex.value = tabIndex.coerceIn(0, 3)
+        _isControlSheetOpen.value = true
+    }
+
+    fun dismissControlSheet() {
+        _isControlSheetOpen.value = false
+    }
+
+    /**
+     * Đổi UA PC/Mobile cho 1 tab. Trạng thái mới lấy trực tiếp từ giá trị trả về của
+     * GameTabManager.toggleDesktopMode() nên UI không phải tự đoán; `desktopModeStates`
+     * chỉ là bản phản chiếu để nút PC trong sheet vẽ đúng màu.
+     */
+    fun toggleDesktopMode(tabIndex: Int) {
+        val isPc = tabManager.toggleDesktopMode(tabIndex)
+        val next = _desktopModeStates.value.toMutableList()
+        next[tabIndex.coerceIn(0, 3)] = isPc
+        _desktopModeStates.value = next
+    }
+
+    fun reloadTab(tabIndex: Int) {
+        tabManager.getOrCreateWebView(tabIndex).reload()
+    }
+
+    fun stopSingleTab(tabIndex: Int) {
+        tabManager.stopSingleTab(tabIndex)
     }
 
     fun startEditingAccount(tabIndex: Int) {
