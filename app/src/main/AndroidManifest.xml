@@ -65,6 +65,14 @@
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
             </intent-filter>
         </receiver>
+
+        <!-- androidx.profileinstaller khai báo ProfileInstallReceiver exported=true và bản thân
+             thư viện KHÔNG kiểm tra quyền gọi (đã kiểm bằng javap trên 1.3.1 và 1.4.0). Tác động
+             chỉ là ghi/huỷ profile, nhưng không có lý do gì để mở một component mà app không
+             dùng: gỡ hẳn khỏi manifest đã merge. -->
+        <receiver
+            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+            tools:node="remove" />
     </application>
 
 </manifest>

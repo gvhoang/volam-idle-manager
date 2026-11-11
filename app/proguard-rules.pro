@@ -5,12 +5,23 @@
 # For more details, see
 #   http://developer.android.com/guide/developing/tools/proguard.html
 
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# ============================================================================
+# CẦU JS → KOTLIN (bắt buộc)
+# GameTabManager gắn AndroidGameBridge vào WebView bằng addJavascriptInterface.
+# Script bơm vào trang gọi các method đó THEO TÊN. R8 đổi tên method là mất luôn
+# nhận diện trạng thái game và tự đăng nhập lại — và mất trong im lặng, vì lời gọi
+# nằm trong try/catch phía JS. Giữ nguyên mọi method có @JavascriptInterface.
+# ============================================================================
+-keepclassmembers class * {
+    @android.webkit.JavascriptInterface <methods>;
+}
+-keepclassmembers class com.example.webview.GameTabManager$AndroidGameBridge {
+    public *;
+}
+-keep class com.example.webview.GameTabManager$AndroidGameBridge { *; }
+
+# Giữ tên class của bridge để log/反射 không đổi giữa bản debug và release.
+-keepnames class com.example.webview.GameTabManager$AndroidGameBridge
 
 # Uncomment this to preserve the line number information for
 # debugging stack traces.

@@ -8,7 +8,12 @@ debug.keystore
 *.p12
 *.pfx
 my-upload-key.jks
+volamidle-release.p12
 keystore.properties
+KEYSTORE-INFO.txt
+MAT-KHAU.txt
+*-key-backup/
+*key-backup*/
 
 # ============================================================
 # Local config — NEVER commit

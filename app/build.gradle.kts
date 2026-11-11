@@ -16,21 +16,44 @@ android {
     applicationId = "com.aistudio.volamidle.qkrvtp"
     minSdk = 24
     targetSdk = 36
-    versionCode = 5
-    versionName = "4.1.0"
+    // Từ 5.0.0: versionCode = major*10000 + minor*100 + patch (5.0.0 → 50000).
+    // Khớp VersionRules.versionCodeFromTag() nên tag và body release luôn cùng một con số.
+    versionCode = 50000
+    versionName = "5.0.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
-  // Do not remove or modify these signingConfigs. They are necessary for building, installing,
-  // and updating Android apps in AI Studio.
+  // Ký bản release bằng khoá thật (docs/RELEASE.md §3).
+  // Nguồn cấu hình, theo thứ tự ưu tiên: keystore.properties ở thư mục gốc repo (gitignored)
+  // → biến môi trường. Tệp khoá KHÔNG tồn tại thì không gán storeFile: nhờ vậy máy không có
+  // khoá (CI, máy khác) vẫn chạy được test/lint/assembleDebug, còn assembleRelease sẽ báo lỗi
+  // rõ ràng thay vì lặng lẽ dùng khoá khác.
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
-      storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      // Đọc keystore.properties bằng tay thay vì java.util.Properties: trong .gradle.kts
+      // block `apply { load(...) }` không suy được kiểu và làm hỏng script compilation.
+      val props = HashMap<String, String>()
+      val propsFile = rootProject.file("keystore.properties")
+      if (propsFile.exists()) {
+        propsFile.readLines().forEach { line ->
+          val sep = line.indexOf('=')
+          if (sep > 0) props[line.substring(0, sep).trim()] = line.substring(sep + 1).trim()
+        }
+      }
+
+      val storePath = props["storeFile"] ?: System.getenv("KEYSTORE_PATH") ?: "volamidle-release.p12"
+      val store = rootProject.file(storePath)
+      if (store.exists()) {
+        storeFile = store
+        storePassword = props["storePassword"] ?: System.getenv("STORE_PASSWORD")
+        keyAlias = props["keyAlias"] ?: System.getenv("KEY_ALIAS") ?: "upload"
+        keyPassword = props["keyPassword"] ?: System.getenv("KEY_PASSWORD")
+      }
+      // v1 bật có chủ ý: minSdk 24 nên Android 7.0–8.1 có thể không đọc được signer của APK
+      // chỉ ký v2 qua getPackageArchiveInfo, làm preflight của bộ cập nhật báo INVALID_APK.
+      enableV1Signing = true
+      enableV2Signing = true
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -43,15 +66,16 @@ android {
   buildTypes {
     release {
       isCrunchPngs = false
-      isMinifyEnabled = false
+      // Bật rút gọn cho bản phát hành. Quy tắc giữ bridge JS nằm ở proguard-rules.pro —
+      // thiếu nó thì R8 đổi tên @JavascriptInterface và app mất nhận diện trạng thái game
+      // trong im lặng (không crash).
+      isMinifyEnabled = true
+      isShrinkResources = true
+      isDebuggable = false
       proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
-      // AI Studio.
       signingConfig = signingConfigs.getByName("release")
     }
     debug {
-      // Do not remove or modify this signingConfig assignment. It is necessary for Android apps in
-      // AI Studio.
       signingConfig = signingConfigs.getByName("debugConfig")
     }
   }

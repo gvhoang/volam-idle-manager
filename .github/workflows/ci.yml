@@ -1,0 +1,95 @@
+name: CI
+
+# Release builds are cut by hand on a workstation that holds the upload key
+# (see docs/RELEASE.md). CI only proves the tree compiles, the unit tests pass
+# and lint is clean -- it never signs anything and needs no signing material.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-and-lint:
+    name: Unit tests + lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      # Bootstrap JVM for the Gradle launcher only. The build itself runs on the
+      # JDK 25 pinned in gradle/gradle-daemon-jvm.properties, which the foojay
+      # resolver downloads on first use.
+      - name: Set up JDK 21 (Gradle launcher)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install SDK platform and build-tools
+        run: sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
+
+      # Caches the Gradle User Home (dependencies, build cache, downloaded
+      # toolchains) across runs and adds a Gradle summary to the job output.
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      # gradlew is committed as mode 100644 (checked out non-executable on Linux),
+      # so invoking ./gradlew directly would fail with "Permission denied".
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      # Ranh giới của kênh cập nhật là tệp khoá ký. Một lần commit nhầm là coi như mất
+      # toàn bộ giá trị của kiểm tra chữ ký. Chặn ở đây rẻ hơn nhiều so với sửa lịch sử.
+      - name: Chặn tệp khoá ký bị track
+        run: |
+          hits=$(git ls-files | grep -Ei '(\.jks$|\.p12$|\.pfx$|\.keystore$|keystore\.properties|KEYSTORE-INFO|MAT-KHAU)' || true)
+          if [ -n "$hits" ]; then
+            echo "::error::Phát hiện tệp khoá ký/bí mật được track trong git:"
+            echo "$hits"
+            exit 1
+          fi
+          echo "Không có tệp khoá ký nào bị track."
+
+      # No keystore.properties, no .env and no google-services.json are needed:
+      # the google-services plugin is configured with
+      # MissingGoogleServicesStrategy.WARN (plus googleServices.missing.passthrough=true)
+      # and the secrets plugin falls back to the committed .env.example.
+      - name: Run unit tests and lint
+        run: ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug
+
+      - name: Upload unit test reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: |
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/test-results/testDebugUnitTest/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Upload lint reports
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-reports
+          path: |
+            app/build/reports/lint-results-debug.html
+            app/build/reports/lint-results-debug.txt
+            app/build/reports/lint-results-debug.xml
+          if-no-files-found: ignore
+          retention-days: 14

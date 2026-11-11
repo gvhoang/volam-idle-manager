@@ -216,6 +216,11 @@ class UpdateRepository(
         }
         if (!mutex.tryLock()) return@withContext
         try {
+            // Kiểm lại ngay trước khi cài, không chỉ lúc tải xong. Giữa hai thời điểm đó người
+            // dùng có thể rời app để cấp quyền "Cài ứng dụng không rõ nguồn gốc" rồi quay lại —
+            // tệp nằm im trong cacheDir suốt khoảng thời gian ấy. Cùng một preflight, không
+            // thêm logic mới; UpdateFailure rơi vào catch bên dưới như mọi lỗi khác.
+            inspector.preflight(apk, BuildConfig.VERSION_CODE)
             val versionName = currentRelease?.versionName ?: BuildConfig.VERSION_NAME
             _state.value = UpdateUiState.Installing
             installer.install(apk)
@@ -298,8 +303,16 @@ class UpdateRepository(
         return message
     }
 
-    fun releasesPageUrl(): String =
-        currentRelease?.htmlUrl ?: "https://github.com/gvhoang/volam-idle-manager/releases"
+    /**
+     * URL mở bằng ACTION_VIEW. `html_url` đến từ response của GitHub, không phải từ code, nên
+     * chỉ nhận khi đúng tiền tố repo này — nếu không thì một release bị sửa có thể đẩy người
+     * dùng sang một trang bất kỳ trong trình duyệt.
+     */
+    fun releasesPageUrl(): String {
+        val fallback = "https://github.com/gvhoang/volam-idle-manager/releases"
+        val url = currentRelease?.htmlUrl ?: return fallback
+        return if (url.startsWith("https://github.com/gvhoang/volam-idle-manager/")) url else fallback
+    }
 
     // =========================================================================
     // TIỆN ÍCH

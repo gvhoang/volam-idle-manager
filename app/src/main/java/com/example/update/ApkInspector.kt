@@ -59,7 +59,10 @@ class ApkInspector(private val context: Context) {
         if (archiveSigners.isEmpty() || installedSigners.isEmpty()) {
             throw UpdateFailure(R.string.update_error_invalid_apk, kind = UpdateFailure.Kind.INVALID_APK)
         }
-        if (archiveSigners.intersect(installedSigners).isEmpty()) {
+        // Android đòi TOÀN BỘ signer set trùng khớp, không phải "giao khác rỗng". Dùng phép
+        // giao thì preflight có thể cho qua rồi hệ thống vẫn từ chối với
+        // INSTALL_FAILED_UPDATE_INCOMPATIBLE — thông báo khi đó sai và khó hiểu.
+        if (archiveSigners != installedSigners) {
             throw UpdateFailure(R.string.update_error_signature, kind = UpdateFailure.Kind.SIGNATURE)
         }
 
