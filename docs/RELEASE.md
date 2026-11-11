@@ -324,6 +324,13 @@ Build đã được kiểm chứng là tái lập được: build lại (kể c�
 byte giống hệt. Nếu hash khác, **không phát hành** — có gì đó không tất định (thời gian,
 đường dẫn, dependency trôi). Tìm nguyên nhân trước.
 
+> **Bẫy đã gặp (5.0.0):** APK build từ cây làm việc **có thay đổi chưa commit** sẽ khác APK
+> build từ clone sạch, vì `META-INF/version-control-info.textproto` trong APK ghi lại trạng
+> thái git lúc build. Cùng một cây thì tái lập hoàn toàn (zip timestamp được chuẩn hoá về
+> 1981-01-01), nhưng cây bẩn ≠ clone sạch. Vì vậy: **commit trước, rồi build từ clone của
+> đúng tag** — hash của artefact phát hành là hash của bản build từ tag, không phải từ máy
+> đang sửa dở.
+
 ---
 
 ## 6. Phát hành
