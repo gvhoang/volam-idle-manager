@@ -140,6 +140,13 @@ class GameTabManager(
     // Đếm số lần tự tải lại khi lỗi máy chủ tạm thời, để không lặp vô hạn
     private val mainFrameRetryCount = IntArray(TabLimits.SLOT_COUNT) { 0 }
 
+    // Mốc thời gian của dòng log gần nhất do script đẩy về (vd "🤖 nhận quà: điểm danh").
+    // Watchdog trong trang ghi đè lastStatus bằng "🟢 Đang chạy ổn định" mỗi nhịp quét, nên
+    // nếu không giữ lại thì mọi thông báo của bộ tự động chỉ hiện trong <1 giây: người dùng
+    // không thể biết auto đang làm gì, và QA cũng không quan sát được.
+    private val lastGameLogAtMs = LongArray(TabLimits.SLOT_COUNT) { 0L }
+    private val gameLogStickyMs = 8_000L
+
     // Lỗi main-frame gần nhất của từng tab. null = trang hiện tại không có lỗi.
     // Dùng để onPageFinished biết đây là trang lỗi nội bộ của Chromium, không phải trang thật.
     private val lastMainFrameError = arrayOfNulls<Int>(TabLimits.SLOT_COUNT)
@@ -1111,8 +1118,14 @@ class GameTabManager(
                         .replace("\n", " ").replace(Regex("\\s+"), " ").trim()
                     val daTau = json.optString("daTauQuest", prev.daTauQuest)
                         .replace("\n", " ").replace(Regex("\\s+"), " ").trim()
-                    val status = json.optString("lastStatus", prev.lastStatus)
-                        .replace("\n", " ").replace(Regex("\\s+"), " ").trim()
+                    // Có log mới trong 8 giây thì giữ log đó, đừng để watchdog ghi đè.
+                    val recentLog = System.currentTimeMillis() - lastGameLogAtMs[tabIndex] < gameLogStickyMs
+                    val status = if (recentLog) {
+                        prev.lastStatus
+                    } else {
+                        json.optString("lastStatus", prev.lastStatus)
+                            .replace("\n", " ").replace(Regex("\\s+"), " ").trim()
+                    }
 
                     currentList[tabIndex] = prev.copy(
                         state = TabLifecycleState.IN_GAME,
@@ -1155,6 +1168,7 @@ class GameTabManager(
         fun onGameLog(idx: Int, message: String) {
             mainHandler.post {
                 if (tabIndex !in _characterStatsList.value.indices) return@post
+                lastGameLogAtMs[tabIndex] = System.currentTimeMillis()
                 val currentList = _characterStatsList.value.toMutableList()
                 val prev = currentList[tabIndex] ?: CharacterStats(tabIndex = tabIndex)
                 currentList[tabIndex] = prev.copy(

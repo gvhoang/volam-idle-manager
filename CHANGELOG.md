@@ -8,6 +8,48 @@ Từ 5.0.0, `versionCode` theo công thức `major * 10000 + minor * 100 + patch
 
 ---
 
+## [5.1.0]
+
+Bản này tồn tại vì **game đổi giao diện** (build 1041, bộ tài nguyên `1041h5.211`: `ui20.css`,
+thanh tab dưới, toàn bộ DOM cũ bị thay). Lớp đọc DOM của app phải viết lại.
+
+### Sửa
+
+- **Nhận diện “đã vào game” sai hoàn toàn.** Điều kiện cũ dò chữ “Hành trang” và “Võ công” trong
+  `bodyText`. Giao diện mới có hai chữ đó **luôn hiện** ở thanh tab dưới, kể cả tại màn hình
+  đăng nhập, nên tab nào cũng bị coi là đã vào game và **auto-login không bao giờ chạy**. Nay
+  dò cấu trúc: `#modeSw` hiện, `body.u20`/`u2m`, `#stageLbl` có chữ.
+- **Ô “Nhớ tài khoản” đổi từ checkbox sang `<button id="ngRem" class="cb on">`.** Code cũ chỉ
+  quét `input[type=checkbox]` nên không tích được. Nay đọc/ghi theo id, giữ đường checkbox làm
+  dự phòng.
+- **Chọn nhân vật có thể gây vòng lặp tải lại.** `#csGo` bị `disabled` khi ô đang chọn trống;
+  `cselEnter()` ghi `SLOT_PTR` rồi `location.reload()`. Nay chỉ bấm `#csGo` khi nó bật, ô trống
+  thì nhảy sang thẻ nhân vật khác thay vì bấm vào ô rỗng.
+- **Nút “Thử lại” của game giờ là `location.reload()`** — bấm mỗi nhịp quét sẽ thành vòng lặp
+  tải lại. Nay giới hạn 60 giây một lần.
+- **Gọi `#vlmAuto` với `k = "knb"` luôn ném lỗi** vì `VLM_AUTO_KTC = ["ldt","tt","ttsp"]`.
+  Đã bỏ nhánh đó.
+- **Dòng trạng thái của thẻ tab bị watchdog ghi đè sau chưa tới 1 giây**, nên mọi thông báo
+  `🤖 …` của bộ tự động không ai đọc được — kể cả khi QA. Nay giữ log 8 giây.
+
+### Thay đổi
+
+- Đọc chỉ số nhân vật qua `postMessage({vlm:'st'})` do chính game phát (tên, phái, cấp, %EXP,
+  Dã Tẩu) thay vì quét 400 node DOM.
+- Đồng bộ chế độ dùng `#vlmAuto` → `cheDo{m}` với id `farm`/`dg`/`quest`/`tower`, thay cho việc
+  bấm `<select>` của giao diện cũ.
+- Loại trừ thêm khỏi nhận diện form đăng nhập: `#logBox`, `u20txt`, `chatTxt`, `hhChTxt` và từ
+  khoá “mật ngữ”.
+
+### Hạn chế đã biết
+
+- **Đại Hồng Bao, Hồng Bao, kỷ lục tháp, Boss Hoàng Kim không còn đọc được.** Giao diện mới
+  không có phần tử thường trực nào cho bốn số này — chúng chỉ nằm trong modal (🧧, Leo Tháp).
+  App giữ giá trị cũ thay vì ghi đè bằng 0. Muốn có lại thì cần game bổ sung vào `info`.
+- Tự tạo nhân vật mới: không làm, vì đường đó dẫn tới `cselEnter()` với ô rỗng và tải lại trang.
+
+---
+
 ## [5.0.0]
 
 ### Thay đổi phá vỡ tương thích

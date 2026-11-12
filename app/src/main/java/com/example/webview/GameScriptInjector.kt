@@ -306,9 +306,14 @@ object GameScriptInjector {
                 // Ô chat / ô soạn tin ở đáy màn hình chơi KHÔNG phải ô đăng nhập.
                 // Màn hình chơi luôn có sẵn ô "Nhập tin nhắn..." nên nếu tính nó là ô auth thì
                 // getVisibleEditableInputs().length luôn >= 1 và tab không bao giờ được báo IN_GAME.
-                const CHAT_COMPOSER_KEYWORDS = ['nhan tin', 'tin nhan', 'chat', 'nhap tin', 'noi dung', 'message', 'comment'];
+                // Build 1041 (h5.211): ô chat là #u20txt ("Nhập tin nhắn… (Enter để chat)") trong
+                // khung #u20log, bản PC dùng #chatTxt ("Nhập tin nhắn…"), còn #hhChTxt là ô
+                // "Nhập mật ngữ…" của bảng Kết bạn. Cả ba đều là ô gõ chữ trong game.
+                const CHAT_COMPOSER_KEYWORDS = ['nhan tin', 'tin nhan', 'chat', 'nhap tin', 'noi dung', 'message', 'comment', 'mat ngu'];
 
                 function isChatOrComposer(inp) {
+                    const id = (inp.id || '').toLowerCase();
+                    if (id === 'u20txt' || id === 'chattxt' || id === 'hhchtxt') return true;
                     const meta = getOwnInputMeta(inp);
                     for (const kw of CHAT_COMPOSER_KEYWORDS) {
                         if (meta.includes(kw)) return true;
@@ -316,12 +321,49 @@ object GameScriptInjector {
                     return false;
                 }
 
+                // Ô nhập KHÔNG BAO GIỜ được coi là ô đăng nhập. Danh sách lấy từ toàn bộ <input>
+                // có id trong app.js build 1041, trừ các ô của chính cổng đăng nhập
+                // (#ngU/#ngP/#ngP2) và bảng tài khoản mây (#naU/#naP - chặn riêng bên dưới):
+                //   gcIn mã quà · nmTo/nmIn/nmNote thư · ptName/ptTo/ptNote tổ đội
+                //   hhName/hhMnName/hhDenName/hhChTxt kết bạn · ncName đặt tên nhân vật
+                //   mkU/mkM/mkC/mkP1/mkP2 đổi mật mã · bsTb/bsTuyen tuyển bang
+                //   prQ/hfQ/nkQ ô tìm kiếm · petNmI tên thú
+                const NON_AUTH_IDS = ['gcin', 'nmto', 'nmin', 'nmnote', 'ptname', 'ptto', 'ptnote',
+                                      'hhname', 'hhmnname', 'hhdenname', 'ncname',
+                                      'mku', 'mkm', 'mkc', 'mkp1', 'mkp2', 'bstb', 'bstuyen',
+                                      'prq', 'hfq', 'nkq', 'petnmi', 'nau', 'nap'];
+
+                // Cổng đăng nhập của build 1041 do netGate() dựng trong #modal:
+                // <div class="dn20" data-dn20="1"> ... #ngU / #ngP / #ngIn ...
+                // Chỉ điền tài khoản khi thật sự đang đứng trong cổng này.
+                function authGateRoot() {
+                    return document.querySelector('#modal .dn20[data-dn20], .dn20[data-dn20]');
+                }
+
+                // Phạm vi được phép điền mật khẩu:
+                // - Có cổng .dn20 => chỉ điền trong cổng đó.
+                // - Không có cổng nhưng có bảng tài khoản mây (#naP/#naIn) => không điền gì cả.
+                // - Bản cũ không có cả hai => giữ nguyên hành vi cũ trên toàn trang.
+                function authScopeRoot() {
+                    const gate = authGateRoot();
+                    if (gate) return gate;
+                    if (document.getElementById('naP') || document.getElementById('naIn')) return null;
+                    return document;
+                }
+
                 const allClickables = Array.from(document.querySelectorAll('button, input[type="submit"], input[type="button"], [role="button"], a, div, span, p, label'));
 
                 function getVisibleEditableInputs() {
+                    const scope = authScopeRoot();
+                    if (!scope) return [];
                     return Array.from(document.querySelectorAll('input')).filter(inp => {
+                        if (scope !== document && !scope.contains(inp)) return false;
+                        if (NON_AUTH_IDS.indexOf((inp.id || '').toLowerCase()) >= 0) return false;
+                        if (inp.classList && inp.classList.contains('bhin')) return false;
                         const t = (inp.type || 'text').toLowerCase();
-                        if (['hidden', 'checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'file', 'range', 'color'].includes(t)) {
+                        // number/search/date... không bao giờ là ô tài khoản; loại luôn để các
+                        // bảng Kỳ Trân Các, Chợ, Chuyển sinh không bị tính là "ô đăng nhập".
+                        if (['hidden', 'checkbox', 'radio', 'button', 'submit', 'reset', 'image', 'file', 'range', 'color', 'number', 'search', 'date', 'time', 'datetime-local', 'month', 'week'].includes(t)) {
                             return false;
                         }
                         if (!isVisible(inp)) return false;
@@ -329,6 +371,144 @@ object GameScriptInjector {
                         if (isChatOrComposer(inp)) return false;
                         return true;
                     });
+                }
+
+                // =========================================================================
+                // NHẬN DIỆN MÀN HÌNH THEO CẤU TRÚC DOM CỦA BUILD 1041
+                // Bản 1041 không còn HUD chữ "Hành trang / Kỹ năng / Chế độ :" đứng yên trên
+                // màn hình chơi, nhưng #app được render sẵn ngay cả khi cổng đăng nhập đang
+                // phủ lên trên. Vì vậy KHÔNG được đoán "đã vào game" bằng chữ trong body.
+                // =========================================================================
+                function byId(id) {
+                    return document.getElementById(id);
+                }
+
+                function gateLoginVisible() {
+                    const gate = authGateRoot();
+                    if (!gate || !isVisible(gate)) return false;
+                    const u = byId('ngU');
+                    const p = byId('ngP');
+                    return !!((u && isVisible(u)) || (p && isVisible(p)));
+                }
+
+                function gateMenuVisible() {
+                    const b = byId('ngStart');
+                    return !!(b && isVisible(b));
+                }
+
+                function charSelectVisible() {
+                    const c = byId('csel');
+                    return !!(c && isVisible(c));
+                }
+
+                // Đang thật sự trong game: #modeSw do modeSwSync() tạo và chỉ bỏ class "hidden"
+                // khi S.fac có giá trị; ngoài ra body mang class u20/u2m (u20Apply chỉ bật khi
+                // !!S) và #stageLbl chỉ được updateTop() ghi khi đã vào game.
+                function inGameNow() {
+                    if (gateLoginVisible() || gateMenuVisible() || charSelectVisible()) return false;
+                    const msw = byId('modeSw');
+                    if (msw && !msw.classList.contains('hidden')) return true;
+                    const body = document.body;
+                    if (body && (body.classList.contains('u20') || body.classList.contains('u2m'))) return true;
+                    const stage = byId('stageLbl');
+                    if (stage && (stage.textContent || '').replace(/\s+/g, '') !== '') return true;
+                    const logBox = byId('logBox');
+                    if (logBox && logBox.children && logBox.children.length > 0) return true;
+                    return false;
+                }
+
+                // Nút xác nhận của cổng 1041 là #ngIn (chữ "Xác Định"). Dùng id trước để
+                // không phụ thuộc vào việc nút có bị đổi nhãn hay không.
+                function findGateSubmitButton() {
+                    const gate = authGateRoot();
+                    const btn = byId('ngIn');
+                    if (btn && isVisible(btn) && (!gate || gate.contains(btn))) return btn;
+                    return null;
+                }
+
+                // Tích "Nhớ tài khoản". Build 1041 dùng <button id="ngRem" class="cb on">
+                // (aria-label="Nhớ tài khoản"), không còn <input type="checkbox">.
+                function ensureRememberAccount() {
+                    const rem = byId('ngRem');
+                    if (rem) {
+                        if (!rem.classList.contains('on')) {
+                            try { rem.click(); } catch(e) {}
+                        }
+                        return;
+                    }
+                    const visibleCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter(isVisible);
+                    for (const cb of visibleCheckboxes) {
+                        const lb = cb.closest('label');
+                        const nextEl = cb.nextElementSibling;
+                        const parentEl = cb.parentElement;
+                        const singleCbInParent = parentEl && parentEl.querySelectorAll('input[type="checkbox"]').length === 1;
+                        const cbText = noAccent(
+                            (lb ? (lb.textContent || lb.innerText || '') : '') + ' ' +
+                            (nextEl ? (nextEl.textContent || nextEl.innerText || '') : '') + ' ' +
+                            (singleCbInParent ? (parentEl.textContent || parentEl.innerText || '') : '')
+                        );
+
+                        if (cbText.includes('hien mat') || cbText.includes('hien thi mat') || cbText.includes('show pass')) {
+                            if (cb.checked) {
+                                try { cb.click(); } catch(e) {}
+                            }
+                            continue;
+                        }
+
+                        if (cbText.includes('nho tai khoan') || cbText.includes('ghi nho') || cbText.includes('remember')) {
+                            if (!cb.checked) {
+                                try { cb.click(); } catch(e) {}
+                                if (!cb.checked) {
+                                    cb.checked = true;
+                                    try { cb.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Màn hình chọn nhân vật build 1041: #csel (append vào body) với các thẻ
+                // .cs-slot[data-i] và nút #csGo "Xác Định". #csGo bị disabled khi ô đang chọn
+                // chưa có nhân vật — TUYỆT ĐỐI không gỡ disabled: cselEnter() sẽ ghi SLOT_PTR
+                // của ô trống rồi reload, gây vòng lặp tải lại vô hạn.
+                function tryEnterCharacterSelect() {
+                    const csel = byId('csel');
+                    if (!csel || !isVisible(csel)) return null;
+                    const go = byId('csGo');
+                    if (!go || !isVisible(go) || go.disabled) {
+                        // Ô đang chọn trống nhưng tài khoản còn nhân vật ở ô khác: chuyển sang thẻ
+                        // CÓ nhân vật (app.js: .cs-slot.empty khi ô trống). TUYỆT ĐỐI không bấm
+                        // thẻ trống — onclick của thẻ trống gọi cselEnter() và ghi SLOT_PTR rỗng.
+                        if (Date.now() - (window.__lastCharPickTime || 0) >= 1500) {
+                            const cards = csel.querySelectorAll('.cs-slot[data-i]:not(.empty)');
+                            for (let i = 0; i < cards.length; i++) {
+                                const card = cards[i];
+                                if (card.classList.contains('on')) continue;
+                                window.__lastCharPickTime = Date.now();
+                                realClick(card);
+                                return 'CLICKED_CHARACTER_CARD';
+                            }
+                        }
+                        return 'WAITING_CHAR_SELECT';
+                    }
+                    if (Date.now() - (window.__lastCharGoTime || 0) < 1500) return 'WAITING_CHAR_SELECT';
+
+                    const onCard = csel.querySelector('.cs-slot.on');
+                    if (onCard) realClick(onCard);
+
+                    window.__lastCharGoTime = Date.now();
+                    setTimeout(function() {
+                        try {
+                            // Truy vấn lại: cselPanel() có thể đã dựng lại .cs-panel và thay nút.
+                            const btn = byId('csGo');
+                            if (btn && !btn.disabled && isVisible(btn)) realClick(btn);
+                        } catch(e) {}
+                    }, 120);
+
+                    if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                        window.AndroidBridge.onGameLog(tabIdx, "Đã chọn nhân vật và ấn [Xác Định] vào game");
+                    }
+                    return "CLICKED_CHARACTER_SELECT";
                 }
 
                 // Tìm nút bấm theo danh sách từ khóa chuẩn hóa:
@@ -424,8 +604,10 @@ object GameScriptInjector {
                             }
                         }
                     }
-                    // Fallback chuẩn cho bảng Đăng Nhập 2 ô (Ô 1: Tài khoản, Ô 2: Mật mã) trên màn hình dọc 4 cột hẹp
-                    if (!passInput && editableInputs.length === 2 && !isConfirmField(editableInputs[1])) {
+                    // Fallback chuẩn cho bảng Đăng Nhập 2 ô (Ô 1: Tài khoản, Ô 2: Mật mã) trên màn hình dọc 4 cột hẹp.
+                    // Chỉ dùng khi thật sự có cổng .dn20: ngoài cổng thì hai ô cạnh nhau (đổi mật mã,
+                    // đặt tên, tuyển bang…) không được coi là ô đăng nhập.
+                    if (!passInput && editableInputs.length === 2 && !isConfirmField(editableInputs[1]) && authGateRoot()) {
                         userInput = editableInputs[0];
                         passInput = editableInputs[1];
                     }
@@ -485,35 +667,7 @@ object GameScriptInjector {
                     forceFillReactInput(passInput, password);
 
                     // 2. Tích "Nhớ tài khoản", TUYỆT ĐỐI KHÔNG tích "Hiện mật mã"
-                    const visibleCheckboxes = Array.from(document.querySelectorAll('input[type="checkbox"]')).filter(isVisible);
-                    for (const cb of visibleCheckboxes) {
-                        const lb = cb.closest('label');
-                        const nextEl = cb.nextElementSibling;
-                        const parentEl = cb.parentElement;
-                        const singleCbInParent = parentEl && parentEl.querySelectorAll('input[type="checkbox"]').length === 1;
-                        const cbText = noAccent(
-                            (lb ? (lb.textContent || lb.innerText || '') : '') + ' ' +
-                            (nextEl ? (nextEl.textContent || nextEl.innerText || '') : '') + ' ' +
-                            (singleCbInParent ? (parentEl.textContent || parentEl.innerText || '') : '')
-                        );
-
-                        if (cbText.includes('hien mat') || cbText.includes('hien thi mat') || cbText.includes('show pass')) {
-                            if (cb.checked) {
-                                try { cb.click(); } catch(e) {}
-                            }
-                            continue;
-                        }
-
-                        if (cbText.includes('nho tai khoan') || cbText.includes('ghi nho') || cbText.includes('remember')) {
-                            if (!cb.checked) {
-                                try { cb.click(); } catch(e) {}
-                                if (!cb.checked) {
-                                    cb.checked = true;
-                                    try { cb.dispatchEvent(new Event('change', { bubbles: true })); } catch(e) {}
-                                }
-                            }
-                        }
-                    }
+                    ensureRememberAccount();
 
                     // 3. Sau 65ms (và nhịp bồi dự phòng ở 240ms nếu bảng vẫn mở), kiểm tra lại giá trị và bấm nút "Xác Định"
                     function confirmAndClickSubmit() {
@@ -525,13 +679,16 @@ object GameScriptInjector {
                             if (passInput.value !== password) {
                                 forceFillReactInput(passInput, password);
                             }
-                            const submitBtn = findLoginSubmitButton(passInput);
+                            const submitBtn = findGateSubmitButton() || findLoginSubmitButton(passInput);
                             if (submitBtn) {
                                 window.__lastLoginSubmitTime = Date.now();
                                 realClick(submitBtn);
                                 if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
                                     window.AndroidBridge.onGameLog(tabIdx, "Đã ấn [Xác Định] đăng nhập: " + username);
                                 }
+                                // Build 1041: #ngP.onkeydown Enter cũng gọi đúng submit này.
+                                // Bấm nút rồi gửi thêm Enter = hai lần đăng nhập, nên dừng ở đây.
+                                return;
                             }
                             try {
                                 passInput.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'Enter', code: 'Enter', keyCode: 13, which: 13 }));
@@ -601,9 +758,15 @@ object GameScriptInjector {
                 }
 
                 // =========================================================================
-                // BƯỚC 1.5: KIỂM TRA MÀN HÌNH CHỌN NHÂN VẬT MỚI
-                // (Màn hình này có nút "Tạo Nhân Vật", "Hủy", "Xác Định", hoặc "Vào Game")
+                // BƯỚC 1.5: KIỂM TRA MÀN HÌNH CHỌN NHÂN VẬT
+                // Build 1041: #csel + .cs-slot[data-i] + #csGo "Xác Định" (xem cselPanel()).
                 // =========================================================================
+                const charSelectResult = tryEnterCharacterSelect();
+                if (charSelectResult !== null) {
+                    return charSelectResult;
+                }
+
+                // Máy chủ cũ: danh sách nút chữ "Xác Định" / "Vào Game" / "Bắt Đầu" không có #csel.
                 const charSelectConfirmBtn = findBestButtonByText(function(txtNA, rawTxt, el) {
                     if (txtNA === 'xac dinh' || txtNA === 'vao game' || txtNA === 'bat dau') {
                         // Phải đảm bảo nó không nằm trong popup đăng nhập
@@ -612,8 +775,8 @@ object GameScriptInjector {
                     }
                     return -1;
                 });
-                
-                if (charSelectConfirmBtn && getVisibleEditableInputs().length === 0) {
+
+                if (charSelectConfirmBtn && !charSelectConfirmBtn.disabled && getVisibleEditableInputs().length === 0) {
                      // Click thẻ nhân vật trước nếu có
                      const sects = ['Thiếu Lâm', 'Thiên Vương', 'Đường Môn', 'Ngũ Độc', 'Nga Mi', 'Thúy Yên', 'Cái Bang', 'Thiên Nhẫn', 'Võ Đang', 'Côn Lôn', 'Đoàn Thị'];
                      let charCard = null;
@@ -628,18 +791,20 @@ object GameScriptInjector {
                              }
                          }
                      }
-                     
+
                      if (charCard) {
                          realClick(charCard);
                      }
-                     
+
                      setTimeout(function() {
-                         realClick(charSelectConfirmBtn);
+                         try {
+                             if (charSelectConfirmBtn.isConnected && !charSelectConfirmBtn.disabled) realClick(charSelectConfirmBtn);
+                         } catch(e) {}
                          if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
-                             window.AndroidBridge.onGameLog(tabIdx, "Đã chọn nhân vật và ấn [" + (charSelectConfirmBtn.innerText || "Xác Định") + "] vào game");
+                             window.AndroidBridge.onGameLog(tabIdx, "Đã chọn nhân vật và ấn vào game");
                          }
                      }, 150);
-                     
+
                      return "CLICKED_CHARACTER_SELECT";
                 }
 
@@ -689,23 +854,32 @@ object GameScriptInjector {
 
                 // =========================================================================
                 // BƯỚC 3: KIỂM TRA ĐÃ VÀO TRONG GAME THỰC SỰ HAY CHƯA
-                // Thứ tự ưu tiên: HUD chiến đấu quyết định TRƯỚC, khung Đăng Nhập chỉ là điều kiện phụ.
-                // Màn hình chơi luôn có ô chat ở đáy ("Nhập tin nhắn...") nên nếu để điều kiện
-                // "không còn ô nhập liệu" đứng trước thì tab kẹt vĩnh viễn ở LOGGING_IN.
+                // Build 1041: #app (header + #battle + #panel + #tabs) được render sẵn ngay cả
+                // khi cổng đăng nhập còn phủ trên màn hình, nên chữ "Hành trang" / "Võ công" /
+                // "Hệ thống" của thanh tab LUÔN có trong body.innerText. Đoán theo chữ sẽ báo
+                // IN_GAME sai ngay trên màn hình đăng nhập. Dùng cấu trúc DOM thay thế.
                 // =========================================================================
-                const bodyText = document.body ? (document.body.innerText || '') : '';
-
-                const hasBattleMenu = (bodyText.includes('Hành trang') && (bodyText.includes('Kỹ năng') || bodyText.includes('Võ công') || bodyText.includes('Hệ thống'))) ||
-                                     bodyText.includes('Chế độ :') || 
-                                     bodyText.includes('Chế độ:') ||
-                                     bodyText.includes('Chế Độ :') ||
-                                     bodyText.includes('Chế Độ:');
-
-                if (hasBattleMenu) {
+                if (inGameNow()) {
                     if (window.AndroidBridge && window.AndroidBridge.onInGameDetected) {
                         window.AndroidBridge.onInGameDetected(tabIdx);
                     }
                     return "IN_GAME";
+                }
+
+                // Bản cũ không có #modeSw / body.u20 / body.u2m / #stageLbl: giữ nguyên cách dò chữ.
+                if (!byId('modeSw') && !byId('stageLbl') && !byId('csel') && !authGateRoot()) {
+                    const bodyText = document.body ? (document.body.innerText || '') : '';
+                    const hasBattleMenu = (bodyText.includes('Hành trang') && (bodyText.includes('Kỹ năng') || bodyText.includes('Võ công') || bodyText.includes('Hệ thống'))) ||
+                                         bodyText.includes('Chế độ :') ||
+                                         bodyText.includes('Chế độ:') ||
+                                         bodyText.includes('Chế Độ :') ||
+                                         bodyText.includes('Chế Độ:');
+                    if (hasBattleMenu) {
+                        if (window.AndroidBridge && window.AndroidBridge.onInGameDetected) {
+                            window.AndroidBridge.onInGameDetected(tabIdx);
+                        }
+                        return "IN_GAME";
+                    }
                 }
 
                 return "WAITING_SCREEN";
@@ -810,24 +984,66 @@ object GameScriptInjector {
                 // Loại văn bản trong khung chat khỏi bodyText: người chơi gõ "tạo nhân vật",
                 // "nhớ tài khoản", "đăng ký tài khoản" vào chat sẽ khiến các kiểm tra auth bên
                 // dưới tưởng nhầm là màn đăng nhập và kích hoạt đăng nhập lại liên tục.
+                // Build 1041: ngoài #chatLines (bản PC, gắn trong #battle) và #u20lines (khung
+                // thông báo di động) còn #logBox — nhật ký "Giang hồ" của tab #t-log, tab này
+                // mở sẵn nên mọi dòng chữ của nó đều nằm trong body.innerText.
                 let bodyText = document.body ? (document.body.innerText || '') : '';
-                for (const chatId of ['chatLines', 'u20lines', 'u20log', 'chatBox']) {
+                for (const chatId of ['chatLines', 'u20lines', 'u20log', 'chatBox', 'logBox']) {
                     const cel = document.getElementById(chatId);
                     if (cel && cel.innerText) bodyText = bodyText.split(cel.innerText).join(' ');
                 }
                 const bodyNA = noAccent(bodyText);
                 const allElements = Array.from(document.querySelectorAll('button, [role="button"], a, div, span, p, label'));
 
+                // =========================================================================
+                // GÓI TRẠNG THÁI GAME (2 giây / lần) — app.js: vlmSt() + postMessage({vlm:'st'})
+                // Trường dùng được khi đã vào game:
+                //   o      : "dangnhap" | "menu" | "game" | "uythac"
+                //   ten    : tên nhân vật      phaiTen : tên phái (chữ)
+                //   cap    : cấp               xpp     : % kinh nghiệm (đã làm tròn 0,1)
+                //   dt     : [đã làm hôm nay, trần ngày] của Dã Tẩu
+                // Đây là dữ liệu do chính game công bố, không phụ thuộc tab nào đang mở.
+                // =========================================================================
+                if (!window.__vlScanSt) {
+                    window.__vlScanSt = { t: 0, st: null };
+                    window.addEventListener('message', function (msgEvt) {
+                        try {
+                            if (msgEvt.source !== window) return;
+                            const d = msgEvt.data;
+                            if (!d || d.vlm !== 'st' || !d.st || typeof d.st !== 'object') return;
+                            window.__vlScanSt.st = d.st;
+                            window.__vlScanSt.t = Date.now();
+                        } catch (errSt) {}
+                    });
+                }
+                const stAge = window.__vlScanSt ? (Date.now() - (window.__vlScanSt.t || 0)) : 1e9;
+                const stp = (window.__vlScanSt && stAge < 15000) ? window.__vlScanSt.st : null;
+                const stInGame = !!(stp && stp.o === 'game');
+                // "Ra ngoài game" chỉ tin mẫu MỚI: game post 2 giây/lần, nên mẫu cũ hơn 5 giây
+                // có thể là trạng thái trước khi đăng nhập xong và sẽ báo KICKED sai một nhịp.
+                const stOutGame = !!(stp && stAge < 5000 && (stp.o === 'dangnhap' || stp.o === 'menu'));
+
                 // 1. TỰ ĐỘNG BẤM "CHƠI Ở ĐÂY" / "CHƠI Ở TAB NÀY" NẾU CÓ TRANH CHẤP PHIÊN
                 // Chỉ gọi isVisible(el) khi chuỗi văn bản đã khớp để tránh gây giật lag trên điện thoại
                 for (const el of allElements) {
                     const txt = (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
                     if (!txt || txt.length > 35) continue;
+                    const isRetryBtn = (txt === 'Thử lại');
                     if (txt === 'Chơi ở đây' || txt === 'Chơi ở tab này' ||
                         txt.includes('Chơi ở đây') || txt.includes('Chơi ở tab này') || 
                         txt.includes('Tiếp tục ở đây') || txt.includes('Kết nối lại') ||
-                        txt === 'Thử lại') {
+                        isRetryBtn) {
                         if (!isVisible(el)) continue;
+                        if (isRetryBtn) {
+                            // Build 1041: "Thử lại" của #sfRe / #ngRetry là location.reload().
+                            // Bấm mỗi 2,5 giây sẽ thành vòng lặp tải lại cả 8 tab. Vẫn tự phục
+                            // hồi nhưng tối đa 1 lần / 60 giây; sessionStorage sống qua reload.
+                            const nowRt = Date.now();
+                            let lastRt = 0;
+                            try { lastRt = parseInt(sessionStorage.getItem('__vl_retry_at') || '0', 10) || 0; } catch(eRt) {}
+                            if (nowRt - lastRt < 60000) continue;
+                            try { sessionStorage.setItem('__vl_retry_at', String(nowRt)); } catch(eRt2) {}
+                        }
                         realClick(el);
                         if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
                             window.AndroidBridge.onGameLog(tabIdx, "⚡ Đã tự bấm [" + txt + "] tiếp tục phiên chơi");
@@ -852,130 +1068,192 @@ object GameScriptInjector {
                     }
                 }
 
-                // 2. PHÁT HIỆN ĐANG Ở MÀN HÌNH "BẮT ĐẦU TRÒ CHƠI" HOẶC KHUNG "ĐĂNG NHẬP" HOẶC "CHỌN NHÂN VẬT" (Bản 1031)
-                let isStartOrLoginVisible = bodyNA.includes('bat dau tro choi') ||
-                                            bodyNA.includes('dang ky tai khoan') ||
-                                            bodyNA.includes('chua co tai khoan') ||
-                                            bodyNA.includes('moi tai khoan 1 nhan vat') ||
-                                            bodyNA.includes('nho tai khoan') ||
-                                            bodyNA.includes('hien mat ma') ||
-                                            bodyNA.includes('tao nhan vat');
+                // 2. PHÁT HIỆN MÀN HÌNH ĐĂNG NHẬP / CHỌN NHÂN VẬT (bị văng phiên)
+                // Build 1041: cổng đăng nhập do netGate() dựng trong #modal dưới dạng
+                // .dn20[data-dn20] chứa #ngU / #ngP / #ngIn / #ngStart; màn chọn nhân vật là
+                // #csel + #csGo. Chỉ hai dấu hiệu cấu trúc này là đủ và không thể nhầm với chữ
+                // trong #app của game đang chạy.
+                function visById(id) {
+                    const e = document.getElementById(id);
+                    return !!(e && isVisible(e));
+                }
+                const gateMarkup = !!(document.getElementById('ngStart') || document.getElementById('ngU') ||
+                                      document.getElementById('ngP') || document.getElementById('csel'));
+                const gateOnScreen = visById('ngStart') || visById('ngU') || visById('ngP') || visById('csel');
 
-                if (!isStartOrLoginVisible) {
-                    for (const el of allElements) {
-                        const rawTxt = (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
-                        if (!rawTxt || rawTxt.length > 35) continue;
-                        const tNA = noAccent(rawTxt);
-                        if (tNA === 'bat dau tro choi' || tNA === 'dang ky tai khoan' || tNA === 'xac dinh' || tNA === 'tao nhan vat') {
-                            if (isVisible(el)) {
-                                isStartOrLoginVisible = true;
-                                break;
+                if (gateMarkup) {
+                    if (gateOnScreen || stOutGame) {
+                        if (window.AndroidBridge && window.AndroidBridge.onGameKickedDetected) {
+                            window.AndroidBridge.onGameKickedDetected(tabIdx);
+                        }
+                        return "KICKED_DETECTED";
+                    }
+                } else if (!stInGame) {
+                    // Bản cũ không có cổng .dn20 / #csel: giữ nguyên cách dò chữ.
+                    let isStartOrLoginVisible = bodyNA.includes('bat dau tro choi') ||
+                                                bodyNA.includes('dang ky tai khoan') ||
+                                                bodyNA.includes('chua co tai khoan') ||
+                                                bodyNA.includes('moi tai khoan 1 nhan vat') ||
+                                                bodyNA.includes('nho tai khoan') ||
+                                                bodyNA.includes('hien mat ma') ||
+                                                bodyNA.includes('tao nhan vat');
+
+                    if (!isStartOrLoginVisible) {
+                        for (const el of allElements) {
+                            const rawTxt = (el.textContent || el.innerText || '').replace(/\s+/g, ' ').trim();
+                            if (!rawTxt || rawTxt.length > 35) continue;
+                            const tNA = noAccent(rawTxt);
+                            if (tNA === 'bat dau tro choi' || tNA === 'dang ky tai khoan' || tNA === 'xac dinh' || tNA === 'tao nhan vat') {
+                                if (isVisible(el)) {
+                                    isStartOrLoginVisible = true;
+                                    break;
+                                }
                             }
                         }
                     }
-                }
 
-                if (!isStartOrLoginVisible) {
-                    const visibleAuthInputs = Array.from(document.querySelectorAll('input')).filter(inp => {
-                        if (inp.readOnly || inp.disabled) return false;
-                        const t = (inp.type || '').toLowerCase();
-                        if (['hidden', 'checkbox', 'radio', 'button', 'submit'].includes(t)) return false;
-                        if (!isVisible(inp)) return false;
-                        if (t === 'password') return true;
-                        const pTxt = inp.parentElement ? (inp.parentElement.textContent || inp.parentElement.innerText || '') : '';
-                        const meta = noAccent((inp.placeholder || '') + ' ' + (inp.name || '') + ' ' + (inp.id || '') + ' ' + pTxt);
-                        return meta.includes('mat ma') || meta.includes('mat khau') || meta.includes('password') || meta.includes('tai khoan');
-                    });
-                    if (visibleAuthInputs.length > 0) {
-                        isStartOrLoginVisible = true;
-                    }
-                }
-
-                if (isStartOrLoginVisible) {
-                    if (window.AndroidBridge && window.AndroidBridge.onGameKickedDetected) {
-                        window.AndroidBridge.onGameKickedDetected(tabIdx);
-                    }
-                    return "KICKED_DETECTED";
-                }
-
-                // 3. QUÉT THÔNG SỐ NHÂN VẬT & HÀNH TRANG (KHU VỰC 1, 3, 4)
-                let charName = '';
-                let sect = 'Chưa rõ';
-                let level = '0';
-                let expPercent = '0%';
-                let daiHongBao = '0';
-                let hongBao = '0';
-                let thapRecord = 'Chưa đi';
-                let bossHoangKim = '0';
-                let daTauQuest = 'Chưa nhận';
-
-                // Quét tên nhân vật CÓ GIỚI HẠN: bản cũ duyệt toàn bộ span/div của cả trang mỗi 2500ms.
-                // Nay ưu tiên container chuyên dụng, chỉ dự phòng span/div khi chưa tìm thấy,
-                // cắt ở 400 phần tử đầu và dừng ngay khi có tên để không đốt CPU vô ích.
-                const NAME_SCAN_LIMIT = 400;
-                function isNameLikeText(txt, txtNA) {
-                    if (txt.length < 2 || txt.length > 25) return false;
-                    if (/^\d+$/.test(txt)) return false;
-                    if (txtNA.includes('luc tay') || txtNA.includes('chien luc') || txtNA.includes('che do') ||
-                        txtNA.includes('may chu') || txtNA.includes('vo lam') || txtNA.includes('tai khoan') ||
-                        txtNA.includes('mat ma') || txtNA.includes('bat dau') || txtNA.includes('dang ky')) return false;
-                    if (txt.includes('Cấp') || txt.includes('HP') || txt.includes('MP') || txt.includes('EXP')) return false;
-                    return true;
-                }
-                function scanCharNameIn(nodes) {
-                    for (const el of nodes) {
-                        if (el.children && el.children.length > 2) continue;
-                        const txt = cleanText(el.textContent || '');
-                        if (!txt) continue;
-                        const txtNA = noAccent(txt);
-                        if (!isNameLikeText(txt, txtNA)) continue;
-                        const parentText = el.parentElement ? (el.parentElement.textContent || '') : '';
-                        const parentNA = noAccent(parentText);
-                        if ((parentText.includes('Cấp') || parentText.includes('Lv') || parentText.includes('%')) && !parentNA.includes('luc tay 0')) {
-                            if (isVisible(el)) return txt;
+                    if (!isStartOrLoginVisible) {
+                        // Ô mật khẩu của bảng "Tài khoản · Lưu đám mây" (#naP) KHÔNG phải cổng
+                        // đăng nhập của game: loại nó ra để không tự kích hoạt đăng nhập lại.
+                        const visibleAuthInputs = Array.from(document.querySelectorAll('input')).filter(inp => {
+                            if (inp.readOnly || inp.disabled) return false;
+                            const nid = (inp.id || '').toLowerCase();
+                            if (nid === 'nau' || nid === 'nap') return false;
+                            const t = (inp.type || '').toLowerCase();
+                            if (['hidden', 'checkbox', 'radio', 'button', 'submit'].includes(t)) return false;
+                            if (!isVisible(inp)) return false;
+                            if (t === 'password') return true;
+                            const pTxt = inp.parentElement ? (inp.parentElement.textContent || inp.parentElement.innerText || '') : '';
+                            const meta = noAccent((inp.placeholder || '') + ' ' + (inp.name || '') + ' ' + (inp.id || '') + ' ' + pTxt);
+                            return meta.includes('mat ma') || meta.includes('mat khau') || meta.includes('password') || meta.includes('tai khoan');
+                        });
+                        if (visibleAuthInputs.length > 0) {
+                            isStartOrLoginVisible = true;
                         }
                     }
-                    return '';
-                }
-                charName = scanCharNameIn(
-                    Array.from(document.querySelectorAll('.player-name, .character-name, .font-bold, .text-yellow-400, .text-amber-400')).slice(0, NAME_SCAN_LIMIT)
-                );
-                if (!charName) {
-                    charName = scanCharNameIn(Array.from(document.querySelectorAll('span, div')).slice(0, NAME_SCAN_LIMIT));
-                }
 
-                const sects = ['Thiếu Lâm', 'Thiên Vương', 'Đường Môn', 'Ngũ Độc', 'Nga Mi', 'Thúy Yên', 'Cái Bang', 'Thiên Nhẫn', 'Võ Đang', 'Côn Lôn', 'Đoàn Thị'];
-                for (const s of sects) {
-                    if (bodyText.includes(s)) {
-                        sect = s;
-                        break;
+                    if (isStartOrLoginVisible) {
+                        if (window.AndroidBridge && window.AndroidBridge.onGameKickedDetected) {
+                            window.AndroidBridge.onGameKickedDetected(tabIdx);
+                        }
+                        return "KICKED_DETECTED";
                     }
                 }
 
-                const levelMatch = bodyText.match(/(?:Cấp|Lv\.?|Level)\s*:?\s*(\d+)/i) || bodyText.match(/(\d{1,3})\s*(?:cấp|level)/i);
-                if (levelMatch) level = levelMatch[1];
-                const expMatch = bodyText.match(/(\d+(?:\.\d+)?)\s*%/);
-                if (expMatch) expPercent = expMatch[1] + '%';
+                // 3. QUÉT THÔNG SỐ NHÂN VẬT
+                // Build 1041 là giao diện tab: #t-char / #t-quest / #t-inv mặc định display:none
+                // nên innerText của chúng KHÔNG nằm trong bodyText, và mở tab ra chỉ để đọc số
+                // là thao tác làm nhảy màn hình người chơi. Ưu tiên gói trạng thái game.
+                let charName = '';
+                let sect = '';
+                let level = '';
+                let expPercent = '';
+                // Bốn chỉ số dưới đây từng nằm trong HUD chữ của bản 1031. Build 1041 chỉ còn
+                // chúng bên trong tab/modal riêng, không có phần tử thường trực nào trên màn hình:
+                //   Đại Hồng Bao / Hồng Bao -> modal 🧧 (số lượng nằm trong túi KTC "hb"/"dhb")
+                //   Kỷ lục tháp              -> modal Leo Tháp dòng "Kỷ lục: tầng N"
+                //   Boss Hoàng Kim           -> chỉ là loại quái trong R, không có bộ đếm hiển thị
+                // Gửi chuỗi rỗng thay vì "0": GameTabManager đọc bằng optString(key, prev) nên
+                // giá trị cũ được giữ nguyên, không bị ghi đè thành 0 mỗi 2,5 giây.
+                let daiHongBao = '';
+                let hongBao = '';
+                let thapRecord = '';
+                let bossHoangKim = '';
+                let daTauQuest = '';
 
-                const daiHbMatch = bodyText.match(/Đại\s*hồng\s*bao\s*:?\s*(\d+)/i) || bodyText.match(/🧧\s*Đại\s*:?\s*(\d+)/i);
-                if (daiHbMatch) daiHongBao = daiHbMatch[1];
+                if (stp) {
+                    if (stp.ten) charName = cleanText(String(stp.ten)).slice(0, 25);
+                    if (stp.phaiTen) sect = cleanText(String(stp.phaiTen));
+                    if (stp.cap !== undefined && stp.cap !== null && stp.cap !== '') level = String(stp.cap | 0);
+                    if (typeof stp.xpp === 'number' && isFinite(stp.xpp)) expPercent = String(stp.xpp) + '%';
+                    if (stp.dt && stp.dt.length === 2) {
+                        daTauQuest = 'Hôm nay ' + (stp.dt[0] | 0) + '/' + (stp.dt[1] | 0);
+                    }
+                }
 
-                const hbMatch = bodyText.match(/(?:Hồng\s*bao|Bao\s*lì\s*xì)\s*:?\s*(\d+)/i) || bodyText.match(/🧧\s*:?\s*(\d+)/i);
-                if (hbMatch) hongBao = hbMatch[1];
+                // Dự phòng bằng DOM của chính HUD build 1041 (updateTop ghi mỗi khung hình):
+                // #lv / #lvS là cấp, #xpTxt là "12.3%". Không cần mở tab nào.
+                if (!level) {
+                    const lvEl = document.getElementById('lvS') || document.getElementById('lv');
+                    const lvTxt = lvEl ? cleanText(lvEl.textContent || '') : '';
+                    if (/^\d+$/.test(lvTxt)) level = lvTxt;
+                }
+                if (!expPercent) {
+                    const xpEl = document.getElementById('xpTxt');
+                    const xpTxt = xpEl ? cleanText(xpEl.textContent || '') : '';
+                    if (/^\d+(?:[.,]\d+)?%$/.test(xpTxt)) expPercent = xpTxt.replace(',', '.');
+                }
 
-                const thapMatch = bodyText.match(/(?:Kỷ\s*lục\s*tầng\s*tháp|Tầng\s*tháp|Tháp)\s*:?\s*([^\n,]{1,20})/i);
-                if (thapMatch) thapRecord = cleanText(thapMatch[1]);
+                // Bản cũ không có gói trạng thái: giữ nguyên toàn bộ cách dò chữ cũ.
+                if (!stp) {
+                    // Quét tên nhân vật CÓ GIỚI HẠN: bản cũ duyệt toàn bộ span/div của cả trang mỗi 2500ms.
+                    // Nay ưu tiên container chuyên dụng, chỉ dự phòng span/div khi chưa tìm thấy,
+                    // cắt ở 400 phần tử đầu và dừng ngay khi có tên để không đốt CPU vô ích.
+                    const NAME_SCAN_LIMIT = 400;
+                    function isNameLikeText(txt, txtNA) {
+                        if (txt.length < 2 || txt.length > 25) return false;
+                        if (/^\d+$/.test(txt)) return false;
+                        if (txtNA.includes('luc tay') || txtNA.includes('chien luc') || txtNA.includes('che do') ||
+                            txtNA.includes('may chu') || txtNA.includes('vo lam') || txtNA.includes('tai khoan') ||
+                            txtNA.includes('mat ma') || txtNA.includes('bat dau') || txtNA.includes('dang ky')) return false;
+                        if (txt.includes('Cấp') || txt.includes('HP') || txt.includes('MP') || txt.includes('EXP')) return false;
+                        return true;
+                    }
+                    function scanCharNameIn(nodes) {
+                        for (const el of nodes) {
+                            if (el.children && el.children.length > 2) continue;
+                            const txt = cleanText(el.textContent || '');
+                            if (!txt) continue;
+                            const txtNA = noAccent(txt);
+                            if (!isNameLikeText(txt, txtNA)) continue;
+                            const parentText = el.parentElement ? (el.parentElement.textContent || '') : '';
+                            const parentNA = noAccent(parentText);
+                            if ((parentText.includes('Cấp') || parentText.includes('Lv') || parentText.includes('%')) && !parentNA.includes('luc tay 0')) {
+                                if (isVisible(el)) return txt;
+                            }
+                        }
+                        return '';
+                    }
+                    charName = scanCharNameIn(
+                        Array.from(document.querySelectorAll('.player-name, .character-name, .font-bold, .text-yellow-400, .text-amber-400')).slice(0, NAME_SCAN_LIMIT)
+                    );
+                    if (!charName) {
+                        charName = scanCharNameIn(Array.from(document.querySelectorAll('span, div')).slice(0, NAME_SCAN_LIMIT));
+                    }
 
-                const bossMatch = bodyText.match(/(?:Boss\s*Hoàng\s*Kim|Boss\s*HK)\s*:?\s*(\d+)/i);
-                if (bossMatch) bossHoangKim = bossMatch[1];
+                    const sects = ['Thiếu Lâm', 'Thiên Vương', 'Đường Môn', 'Ngũ Độc', 'Nga Mi', 'Thúy Yên', 'Cái Bang', 'Thiên Nhẫn', 'Võ Đang', 'Côn Lôn', 'Đoàn Thị'];
+                    for (const s of sects) {
+                        if (bodyText.includes(s)) {
+                            sect = s;
+                            break;
+                        }
+                    }
 
-                const daTauMatch = bodyText.match(/(?:Dã\s*Tẩu|Nhiệm\s*vụ\s*Dã\s*Tẩu)\s*:?\s*([^\n,]{1,25})/i);
-                if (daTauMatch) daTauQuest = cleanText(daTauMatch[1]);
+                    const levelMatch = bodyText.match(/(?:Cấp|Lv\.?|Level)\s*:?\s*(\d+)/i) || bodyText.match(/(\d{1,3})\s*(?:cấp|level)/i);
+                    if (levelMatch) level = levelMatch[1];
+                    const expMatch = bodyText.match(/(\d+(?:\.\d+)?)\s*%/);
+                    if (expMatch) expPercent = expMatch[1] + '%';
+
+                    const daiHbMatch = bodyText.match(/Đại\s*hồng\s*bao\s*:?\s*(\d+)/i) || bodyText.match(/🧧\s*Đại\s*:?\s*(\d+)/i);
+                    if (daiHbMatch) daiHongBao = daiHbMatch[1];
+
+                    const hbMatch = bodyText.match(/(?:Hồng\s*bao|Bao\s*lì\s*xì)\s*:?\s*(\d+)/i) || bodyText.match(/🧧\s*:?\s*(\d+)/i);
+                    if (hbMatch) hongBao = hbMatch[1];
+
+                    const thapMatch = bodyText.match(/(?:Kỷ\s*lục\s*tầng\s*tháp|Tầng\s*tháp|Tháp)\s*:?\s*([^\n,]{1,20})/i);
+                    if (thapMatch) thapRecord = cleanText(thapMatch[1]);
+
+                    const bossMatch = bodyText.match(/(?:Boss\s*Hoàng\s*Kim|Boss\s*HK)\s*:?\s*(\d+)/i);
+                    if (bossMatch) bossHoangKim = bossMatch[1];
+
+                    const daTauMatch = bodyText.match(/(?:Dã\s*Tẩu|Nhiệm\s*vụ\s*Dã\s*Tẩu)\s*:?\s*([^\n,]{1,25})/i);
+                    if (daTauMatch) daTauQuest = cleanText(daTauMatch[1]);
+                }
 
                 if (window.AndroidBridge && window.AndroidBridge.onGameStateScanned) {
                     window.AndroidBridge.onGameStateScanned(tabIdx, JSON.stringify({
                         isOnline: true,
-                        characterName: charName || 'Nhân vật ' + (tabIdx + 1),
+                        characterName: charName,
                         sect: sect,
                         level: level,
                         expPercent: expPercent,
@@ -1270,6 +1548,91 @@ object GameScriptInjector {
                 }
 
                 const targetNoAccent = noAccent(titleCaseMode);
+
+                // =========================================================================
+                // ĐƯỜNG CHÍNH (build 1041): KÊNH ẨN #vlmAuto -> VLM_AUTO.cheDo({m})
+                // app.js khai báo MODES = [["farm","⚔","Luyện Công",…],["dg","🏯","Phó Bản",…],
+                // ["quest","📜","Nhiệm Vụ",…],["tower","🗼","Leo Tháp",…]] và cheDo() gọi đúng
+                // setMode() mà nút "Chế Độ:" vẫn gọi. Vì vậy đi qua kênh ẩn bền hơn bấm DOM:
+                // không phụ thuộc dropdown có đang mở hay không, và tự kiểm được kết quả.
+                // =========================================================================
+                var modeId = '';
+                if (targetNoAccent === 'nhiem vu') modeId = 'quest';
+                else if (targetNoAccent === 'pho ban') modeId = 'dg';
+                else if (targetNoAccent === 'luyen cong') modeId = 'farm';
+                else if (targetNoAccent === 'leo thap') modeId = 'tower';
+
+                // Bấm thẳng mục trong menu "Chế Độ:" — dùng khi kênh ẩn từ chối (game chưa vào
+                // hoặc bản cũ không có cheDo). #mswMenu do modeSwSync() dựng, mỗi mục gắn sẵn
+                // onclick = setMode(data-msw) nên bấm được cả khi menu đang đóng.
+                function clickModeMenuItem() {
+                    if (!modeId) return false;
+                    var item = document.querySelector('#mswMenu [data-msw="' + modeId + '"]');
+                    if (!item) return false;
+                    try { item.click(); return true; } catch (eMsw) { return false; }
+                }
+
+                function syncModeViaChannel() {
+                    if (!modeId) return false;
+                    var msw = document.getElementById('modeSw');
+                    // .hidden = chưa vào game (modeSwSync gắn class khi !S.fac): để đường DOM cũ xử lý.
+                    if (!msw || msw.classList.contains('hidden')) return false;
+
+                    var mswBtn = document.getElementById('mswBtn');
+                    if (mswBtn && noAccent(mswBtn.textContent || '').indexOf(targetNoAccent) >= 0) {
+                        return 'ALREADY_IN_MODE:' + titleCaseMode;
+                    }
+
+                    var host = document.body || document.documentElement;
+                    if (!host) return false;
+
+                    var btn = document.createElement('button');
+                    btn.id = 'vlmAuto';
+                    btn.type = 'button';
+                    btn.style.display = 'none';
+                    btn.dataset.act = 'cheDo';
+                    btn.dataset.arg = JSON.stringify({ m: modeId });
+                    host.appendChild(btn);
+                    try { btn.click(); } catch (eC0) {
+                        try { btn.remove(); } catch (eC1) {}
+                        return false;
+                    }
+
+                    var deadline = Date.now() + 6000;
+                    var poll = function () {
+                        var finished = false;
+                        try { finished = !!btn.dataset.xong; } catch (eC2) {}
+                        if (finished) {
+                            var kq = {};
+                            try { kq = JSON.parse(btn.dataset.kq || '{}') || {}; } catch (eC3) {}
+                            try { btn.remove(); } catch (eC4) {}
+                            // kq.ok !== true: lệnh không chạy (chưa vào game / bản cũ) -> bấm nút DOM.
+                            // kq.ok === true nhưng m khác: chính game từ chối (vd Leo Tháp cần cấp
+                            // TOWER_LV) và đã tự đặt lại chế độ — bấm lại nút chỉ lặp lại lời từ chối.
+                            if (kq.ok !== true) {
+                                if (!clickModeMenuItem()) {
+                                    if (window.AndroidBridge && window.AndroidBridge.onGameLog) {
+                                        // Tham số đầu bị AndroidGameBridge bỏ qua: bridge đã gắn
+                                        // sẵn đúng tabIndex của WebView đang chạy script này.
+                                        window.AndroidBridge.onGameLog(0, '⚠ Không đổi được chế độ ' + titleCaseMode + ': ' + String(kq.why || 'không rõ') + ' — thử lại');
+                                    }
+                                }
+                            }
+                            return;
+                        }
+                        if (Date.now() >= deadline) {
+                            try { btn.remove(); } catch (eC5) {}
+                            clickModeMenuItem();
+                            return;
+                        }
+                        setTimeout(poll, 120);
+                    };
+                    setTimeout(poll, 120);
+                    return 'OPENED_TRIGGER_AND_SELECTING:' + titleCaseMode;
+                }
+
+                var channelResult = syncModeViaChannel();
+                if (channelResult) return channelResult;
 
                 function isMatchingOption(textStr, valStr) {
                     const tRaw = (textStr || '').trim();

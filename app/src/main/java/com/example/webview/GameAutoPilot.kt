@@ -706,10 +706,10 @@ class GameAutoPilot(
 
   // ===== KNB thường ở Kỳ Trân Các =====
   // Giá cố định 1 KNB = 1 vạn lượng (1e4) và trần 1.000 KNB / ngày / tài khoản.
-  // Đường chính thức là muaKtc; nếu bảng trắng của game không nhận k:'knb' thì bấm nút
-  // của chính bảng Kỳ Trân Các. Trần, lượng và hạn mức máy chủ vẫn do game kiểm.
+  // Lệnh muaKtc của game CHỈ nhận VLM_AUTO_KTC = ["ldt","tt","ttsp"] và ném
+  // "không mua được <k>" với mọi khoá khác, nên KNB thường không có đường lệnh ẩn:
+  // phải bấm nút trên chính bảng Kỳ Trân Các. Trần, lượng và hạn mức máy chủ vẫn do game kiểm.
   var KNB_GIA = 1e4, KNB_NGAY = 1000;
-  var ktcKnb = 0;        // 0 = chưa thử, 1 = muaKtc nhận knb, -1 = không nhận (đi đường nút)
   var knbGhiLoi = false;
 
   function ghiKnb(n) {
@@ -877,47 +877,25 @@ class GameAutoPilot(
     var got = 0;
     if (!ghiKnb(0)) return;
 
-    if (ktcKnb >= 0) {
-      if (Date.now() - A.stT > 2000 && !await choViMoi(A.stT)) return;
-      if (!A.cfg.on || !ranh() || !A.st || A.st.o !== 'game') return;
-      n = Math.min(n, (A.cfg.knbMua | 0) - demKnb(), KNB_NGAY - demKnb(),
-        Math.floor((viKnb() - sanKnb()) / KNB_GIA));
-      if (n <= 0) return;
-      var stAt = A.stT;
-      var r = await api('muaKtc', { k: 'knb', n: n }, 30000);
-      if (r && r.ok && (r.n | 0) > 0) {
-        ktcKnb = 1;
-        got = r.n | 0;
-        if (!ghiKnb(got)) return;
-        await choViMoi(stAt);
-      } else if (r && r.ok) {
-        return;   // game nhận lệnh nhưng từ chối mua: mở bảng cũng vô ích
-      } else if (r && !r.ok && /không mua được/.test(String(r.why || ''))) {
-        // Chỉ khi game trả lời rõ ràng "không mua được <k>" mới bỏ đường lệnh.
-        // Hết giờ / mất kết nối là lỗi tạm thời, không được tắt đường muaKtc cả phiên.
-        ktcKnb = -1;
-      }
-    }
-
-    if (!got) {
-      // Bảng toàn màn hình che game: chỉ mở khi người chơi đã rảnh 60 giây.
-      if (!ranh()) return;
-      var I1 = await info();
-      if (!I1 || I1.dg || I1.tower || I1.sat || I1.dead) return;
-      var vi1 = viKnb();
-      if (vi1 === null) return;
-      n = Math.min(n, (A.cfg.knbMua | 0) - demKnb(), KNB_NGAY - demKnb(),
-        Math.floor((vi1 - sanKnb()) / KNB_GIA));
-      if (typeof I1.knbCon === 'number' && isFinite(I1.knbCon)) n = Math.min(n, Math.max(0, I1.knbCon | 0));
-      if (n <= 0 || !ranh() || !A.st || A.st.o !== 'game' || Date.now() - A.stT >= 10000) return;
-      // Đọc lại cấu hình ngay trước khi mở bảng: người dùng có thể vừa tắt tự động hoặc
-      // hạ số KNB trong lúc chờ info(), và đây là thao tác tốn lượng nhất trong cả bảng.
-      if (!A.cfg.on || (A.cfg.knbMua | 0) <= 0) return;
-      var moAt = A.userAt;
-      var md = moKtc();
-      if (!md) return;
-      try { got = await bamKnb(n); } finally { dongKtc(md, moAt); }
-    }
+    // Không gọi api('muaKtc', { k: 'knb' }): VLM_AUTO.muaKtc chỉ nhận ldt/tt/ttsp và luôn
+    // ném "không mua được knb". Đường duy nhất là mở bảng Kỳ Trân Các rồi bấm nút.
+    // Bảng toàn màn hình che game: chỉ mở khi người chơi đã rảnh 60 giây.
+    if (!ranh()) return;
+    var I1 = await info();
+    if (!I1 || I1.dg || I1.tower || I1.sat || I1.dead) return;
+    var vi1 = viKnb();
+    if (vi1 === null) return;
+    n = Math.min(n, (A.cfg.knbMua | 0) - demKnb(), KNB_NGAY - demKnb(),
+      Math.floor((vi1 - sanKnb()) / KNB_GIA));
+    if (typeof I1.knbCon === 'number' && isFinite(I1.knbCon)) n = Math.min(n, Math.max(0, I1.knbCon | 0));
+    if (n <= 0 || !ranh() || !A.st || A.st.o !== 'game' || Date.now() - A.stT >= 10000) return;
+    // Đọc lại cấu hình ngay trước khi mở bảng: người dùng có thể vừa tắt tự động hoặc
+    // hạ số KNB trong lúc chờ info(), và đây là thao tác tốn lượng nhất trong cả bảng.
+    if (!A.cfg.on || (A.cfg.knbMua | 0) <= 0) return;
+    var moAt = A.userAt;
+    var md = moKtc();
+    if (!md) return;
+    try { got = await bamKnb(n); } finally { dongKtc(md, moAt); }
 
     if (knbGhiLoi || got <= 0) return;
 
