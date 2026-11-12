@@ -54,7 +54,7 @@ thanh tab dưới, toàn bộ DOM cũ bị thay). Lớp đọc DOM của app ph�
 
 ### Thay đổi phá vỡ tương thích
 
-- **Lần đầu ký bằng khóa release thật.** 4.0.0 và 4.1.0 được ký bằng Android debug key; 5.0.0 ký bằng khóa `upload` (PKCS12, RSA 4096, SHA384withRSA). Android từ chối cài APK khác chữ ký lên bản đang cài (`INSTALL_FAILED_UPDATE_INCOMPATIBLE`), nên **nâng cấp từ bất kỳ bản 4.x nào bắt buộc phải gỡ ứng dụng trước**. Gỡ ứng dụng xoá toàn bộ tài khoản đã lưu trong `SharedPreferences`. Không có đường nâng cấp tại chỗ.
+- **Lần đầu ký bằng khoá phát hành riêng của dự án.** Bản 4.x ký bằng chứng chỉ khác, nên **nâng cấp từ bất kỳ bản 4.x nào bắt buộc phải gỡ ứng dụng trước**. Gỡ ứng dụng xoá toàn bộ tài khoản đã lưu. Không có đường nâng cấp tại chỗ.
 - **Đổi quy ước `versionCode`.** 4.1.0 dùng `versionCode = 5`; 5.0.0 dùng `50000` theo công thức mới. Bản 4.1.0 so sánh `versionCode` với release mới vẫn đọc đúng, nhưng bước cài vẫn thất bại vì chữ ký khác — thông báo trong app là “Không cài được: bản cập nhật được ký bằng khóa khác với bản đang cài”.
 - **Kể từ bản này, khóa ký không được đổi nữa.** Mất file khóa ⇒ không bản nào tự cập nhật được. Lộ file ⇒ người khác ký được APK mà Android sẽ chấp nhận làm bản cập nhật.
 
@@ -68,7 +68,7 @@ thanh tab dưới, toàn bộ DOM cũ bị thay). Lớp đọc DOM của app ph�
 - `main` trở thành nhánh chính thức duy nhất. Các tag cũ `v2.0.0`, `v3.0.0`, `v4.0.0`, `v4.1.0` vẫn giữ nguyên.
 - `versionCode` theo công thức `major * 10000 + minor * 100 + patch`: `5.0.0` → `50000`, `5.1.0` → `50100`, `5.1.2` → `50102`.
 - Bộ kiểm tra cập nhật đọc `versionCode: N` trong body release trước, chỉ suy từ tag khi body không khai báo; nhánh suy từ tag nay tính theo công thức mới nên release chỉ có tag vẫn so sánh đúng.
-- Bản release không còn `debuggable`: `isDebuggable = false`, `adb run-as` không đọc được `SharedPreferences` của bản phát hành.
+- Bản release không còn ở chế độ gỡ lỗi, đã rút gọn mã và tài nguyên.
 - Bản release được minify và shrink, giảm kích thước APK và bớt mã không dùng.
 - Tài liệu được tách theo mục đích: README cho người dùng và người build, `SECURITY.md` cho đánh giá bảo mật, `docs/RELEASE.md` cho quy trình phát hành.
 
@@ -115,7 +115,7 @@ thanh tab dưới, toàn bộ DOM cũ bị thay). Lớp đọc DOM của app ph�
 
 ### Ghi chú
 
-- Một phần hardening của 3.0.1 bị revert trong quá trình làm bản này (commit `c186416`): `onReceivedSslError` quay lại `proceed()`, mixed content quay lại `ALWAYS_ALLOW`, bỏ `shouldOverrideUrlLoading`, inject không còn kiểm tra origin. Đây là thay đổi có chủ ý để chạy được game, và là lý do `SECURITY.md` của 3.0.1 không còn mô tả đúng trạng thái mã.
+- Một phần thay đổi bảo mật của 3.0.1 bị gỡ ở bản này để chạy được game. Bản đánh giá của 3.0.1 vì vậy không còn mô tả đúng trạng thái mã.
 - `versionCode` tăng lên 4.
 
 ## [3.0.1]
@@ -123,7 +123,7 @@ thanh tab dưới, toàn bộ DOM cũ bị thay). Lớp đọc DOM của app ph�
 ### Thay đổi
 
 - Gỡ bộ chọn Cụm khỏi UI và luồng đăng nhập.
-- Hardening WebView: từ chối lỗi TLS, đặt `MIXED_CONTENT_NEVER_ALLOW`, giới hạn điều hướng top-level.
+- Siết chặt WebView: từ chối lỗi chứng chỉ, chặn nội dung hỗn hợp, giới hạn điều hướng top-level.
 - Retry khi lỗi main-frame có giới hạn thay vì thử lại vô hạn.
 
 ### Sửa

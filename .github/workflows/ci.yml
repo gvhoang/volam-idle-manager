@@ -1,8 +1,8 @@
 name: CI
 
-# Release builds are cut by hand on a workstation that holds the upload key
-# (see docs/RELEASE.md). CI only proves the tree compiles, the unit tests pass
-# and lint is clean -- it never signs anything and needs no signing material.
+# Release builds are produced outside CI. CI only proves the tree compiles, the
+# unit tests pass and lint is clean -- it never signs anything and needs no
+# signing material.
 on:
   push:
     branches: [main]
