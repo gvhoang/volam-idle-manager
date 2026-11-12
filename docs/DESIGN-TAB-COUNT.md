@@ -215,7 +215,7 @@ Không dùng biến thể chỉ-chấm 18dp (target 18×32dp — trượt access
 | Khoảng | clamp 1..8 khi ghi **và** khi đọc |
 | Ghi | `commit()` (app 24/7, có thể bị thu hồi bất cứ lúc nào) |
 | Tên profile WebView | **ĐÓNG BĂNG** `Isolated_Cluster_<id>_Tab_<n>`. Không suy ra từ `tabCount`, không "nén" index, **cấm đổi thứ tự tab** — cookie/localStorage nằm trên đĩa theo đúng chuỗi đó và app không bao giờ gọi `deleteProfile`. |
-| Tài khoản khi giảm N | **Giữ, không xoá.** `getAccount`/`saveAccount` theo index, không xoá gì. Tab `[n, old)` bị dừng + destroy WebView nhưng `user_tab_i`/`pass_tab_i`/`auto_tab_i`/`url_tab_i` còn nguyên. Lý do: (a) đó là dữ liệu người dùng nhập, xoá vì một toggle UI là mất dữ liệu không hoàn tác; (b) thư mục profile trên đĩa cũng sống sót qua `destroy()`, nên tăng lại N là khôi phục cookie; (c) xoá-khi-toggle làm hỏng đúng workflow "thử 8 rồi về 2" mà chặn renderer sinh ra để phục vụ. |
+| Tài khoản khi giảm N | **Giữ, không xoá.** `getAccount`/`saveAccount` theo index, không xoá gì. Tab `[n, old)` bị dừng + destroy WebView nhưng các khoá lưu tài khoản/URL/cờ tự động theo index còn nguyên. Lý do: (a) đó là dữ liệu người dùng nhập, xoá vì một toggle UI là mất dữ liệu không hoàn tác; (b) thư mục profile trên đĩa cũng sống sót qua `destroy()`, nên tăng lại N là khôi phục cookie; (c) xoá-khi-toggle làm hỏng đúng workflow "thử 8 rồi về 2" mà chặn renderer sinh ra để phục vụ. |
 | `vlm_auto_<k>` | **Không đổi.** Nằm trong `localStorage` theo profile; profile 0..3 giữ nguyên tên ⇒ counter nguyên vẹn; 4..7 mới ⇒ bắt đầu rỗng (đúng). |
 
 ## 9. Thứ tự triển khai
