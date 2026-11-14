@@ -27,7 +27,7 @@ Từ 5.0.0, `versionCode` theo công thức `major * 10000 + minor * 100 + patch
 
 ### Sửa
 
-- Cửa sổ "người chơi đang rảnh" giữ nguyên **60 giây**. Bản dev hạ xuống 15 giây, mà nhịp quét là
+- Cửa sổ "người chơi đang rảnh" giữ nguyên **60 giây**. Bản thử nghiệm hạ xuống 15 giây, mà nhịp quét là
   20 giây — hạ như vậy thì bộ tự động gần như chạy ngay sau mỗi lần người chơi dừng tay.
 - Bỏ đoạn "nhận quà dự phòng" bằng DOM: nó đóng hộp thoại người chơi đang mở và dùng hai selector
   không tồn tại trong game (`data-q="login"`, `data-q="lvms"`).
