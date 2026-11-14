@@ -2,8 +2,8 @@
 
 Chạy **1–8 tài khoản** webgame [Võ Lâm Idle](https://volamidle.pages.dev) song song trong một ứng dụng Android. Mỗi tab là một phiên riêng, tự đăng nhập, tự vào lại khi bị văng, giữ kết nối qua đêm, tự làm việc trong game và tự cập nhật từ GitHub Releases.
 
-[![Release](https://img.shields.io/badge/release-v5.1.0-2ea44f?style=flat-square)](https://github.com/gvhoang/volam-idle-manager/releases/tag/v5.1.0)
-[![versionCode](https://img.shields.io/badge/versionCode-50100-2ea44f?style=flat-square)](CHANGELOG.md)
+[![Release](https://img.shields.io/badge/release-v5.2.1-2ea44f?style=flat-square)](https://github.com/gvhoang/volam-idle-manager/releases/tag/v5.2.1)
+[![versionCode](https://img.shields.io/badge/versionCode-50201-2ea44f?style=flat-square)](CHANGELOG.md)
 [![minSdk 24 (Android 7.0)](https://img.shields.io/badge/minSdk-24-3ddc84?style=flat-square)](#yêu-cầu-hệ-thống)
 [![License](https://img.shields.io/badge/license-All%20rights%20reserved-lightgrey?style=flat-square)](#giấy-phép)
 
@@ -30,7 +30,7 @@ Võ Lâm Idle là webgame idle chạy hoàn toàn trong trình duyệt. Chơi nh
 | Trường | Giá trị |
 |---|---|
 | Tên hiển thị (launcher) | `Võ Lâm Idle` |
-| Phiên bản / `versionCode` | `5.1.0` / `50100` |
+| Phiên bản / `versionCode` | `5.2.1` / `50201` |
 | `applicationId` | `com.aistudio.volamidle.qkrvtp` |
 | `minSdk` / `targetSdk` / `compileSdk` | 24 / 36 / 36 |
 | Máy chủ game | `https://volamidle.pages.dev` (mặc định) |
@@ -66,7 +66,7 @@ Dải trạng thái 32dp ở đáy (`☰`, chip tab, `⋯`) và sheet điều kh
 | Tranh chấp phiên | Tự bấm “Chơi ở đây”, “Chơi ở tab này”, “Tiếp tục ở đây”, “Kết nối lại”, “Thử lại”; bị văng thì đăng nhập lại |
 | Nhận diện đã vào game | Dựa trên HUD trong game; ô chat không bị nhầm là ô đăng nhập |
 
-Từ 5.1.0, lớp nhận diện bám theo giao diện game build 1041. Game đổi giao diện lần nữa thì phần này cần cập nhật theo.
+Lớp nhận diện bám theo giao diện game build 1041. Game đổi giao diện lần nữa thì phần này cần cập nhật theo.
 
 ### Tự động trong game
 
@@ -143,7 +143,7 @@ Mở bằng `⋯` ở góc phải dải trạng thái. Mở/đóng không đổi
 | 6 | `ĐỒNG BỘ AUTO CẢ <N> TAB`: `📜 Nhiệm Vụ`, `⚔️ Phó Bản`, `🔥 Luyện Công` |
 | 7 | `🤖 Tự động` — cấu hình auto-pilot |
 | 8 | `☰ Bảng điều khiển` |
-| 9 | `📦 Phiên bản: 5.1.0` và các nút kiểm tra, tải, cài cập nhật |
+| 9 | `📦 Phiên bản: 5.2.1` và các nút kiểm tra, tải, cài cập nhật |
 
 `☰` mở bảng điều khiển đầy đủ: tài khoản từng tab, `ĐĂNG NHẬP HẾT`, `DỪNG TẤT CẢ`, đồng bộ “Màn hình đen”.
 
@@ -168,9 +168,10 @@ Mở bằng `⋯` ở góc phải dải trạng thái. Mở/đóng không đổi
 
 - `🌙 Treo máy`: overlay đen, độ sáng `0.01`, chạm đúp hoặc Back để mở khóa; màn hình vẫn sáng và service vẫn chạy.
 - `⚡ 30FPS` / `⚡ 60FPS`: áp ngay cho mọi tab; 30 FPS giảm tải đáng kể khi chạy nhiều tab.
-- `📦 Phiên bản: 5.1.0` → `Kiểm tra cập nhật` → `Tải về` → `Cài đặt`. Android hỏi xác nhận, cài đè giữ nguyên tài khoản. Cần quyền “Cài ứng dụng không rõ nguồn gốc”; app có nút mở thẳng màn hình đó.
+Khi có bản mới, lần mở app kế tiếp sẽ hiện hộp thoại **Đã có bản cập nhật** — chọn **Để sau** thì không bị nhắc lại cho bản đó.
+- `📦 Phiên bản: 5.2.1` → `Kiểm tra cập nhật` → `Tải về` → `Cài đặt`. Android hỏi xác nhận, cài đè giữ nguyên tài khoản. Cần quyền “Cài ứng dụng không rõ nguồn gốc”; app có nút mở thẳng màn hình đó.
 
-Số phiên bản so bằng `versionCode`, không so chuỗi: `versionCode = major * 10000 + minor * 100 + patch`, ví dụ `5.1.0 → 50100`, `6.0.0 → 60000`.
+Số phiên bản so bằng `versionCode`, không so chuỗi: `versionCode = major * 10000 + minor * 100 + patch`, ví dụ `5.2.1 → 50201`, `6.0.0 → 60000`.
 
 ## Tham chiếu cấu hình tự động
 

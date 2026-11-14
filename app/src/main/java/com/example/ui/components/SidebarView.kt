@@ -233,6 +233,9 @@ fun SidebarView(
                     StatRow(label = "🗼 Kỷ lục tháp", value = activeStats.thapRecord, valueColor = Color(0xFF67E8F9))
                     StatRow(label = "👹 Boss HK hạ", value = activeStats.bossHoangKim, valueColor = Color(0xFFFDE047))
                     StatRow(label = "📜 Dã Tẩu", value = activeStats.daTauQuest, valueColor = Color(0xFF86EFAC))
+                    if (activeStats.tasksCompleted.isNotBlank()) {
+                        StatRow(label = "✅ Hoàn thành", value = activeStats.tasksCompleted, valueColor = Color(0xFF10B981))
+                    }
                 }
             }
 

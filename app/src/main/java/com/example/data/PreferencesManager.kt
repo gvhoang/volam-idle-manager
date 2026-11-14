@@ -39,6 +39,15 @@ class PreferencesManager(context: Context) {
         private const val KEY_UPDATE_CACHED_RELEASE = "update_cached_release"
         private const val KEY_UPDATE_BANNER_SHOWN_FOR = "update_banner_shown_for"
 
+        /**
+         * `versionCode` đã hiện HỘP THOẠI nhắc cập nhật lúc mở app.
+         *
+         * Cố ý tách khỏi [KEY_UPDATE_BANNER_SHOWN_FOR]: hộp thoại và banner 32dp là hai mức
+         * nhắc khác nhau. Dùng chung một cờ thì hộp thoại sẽ "ăn" mất lượt của banner, trong
+         * khi yêu cầu là "Để sau" vẫn có thể thấy banner nhắc lại (không hiện lại hộp thoại).
+         */
+        private const val KEY_UPDATE_DIALOG_SHOWN_FOR = "update_dialog_shown_for"
+
         // Kết quả cài đặt: "status|message|versionName|timestamp". Kết quả thường tới ở
         // process MỚI, nên đây là nguồn duy nhất còn lại khi UI mở lại.
         private const val KEY_UPDATE_INSTALL_RESULT = "update_install_result"
@@ -206,6 +215,48 @@ class PreferencesManager(context: Context) {
             .commit()
     }
 
+    /**
+     * Xoá tài khoản của MỘT tab ở MỌI cụm.
+     *
+     * `saveAccount()`/`getAccount()` đọc-ghi cùng một tài khoản dưới nhiều hình dạng khoá:
+     * `user_cluster_cụm_1_tab_N`, `user_cluster_1_tab_N` (id số của game), `user_cluster_Cụm 1_tab_N`
+     * (chuỗi cụm thô), `pref_user_tab_N` (khoá cũ) và `user_tab_N` (khoá trần). Người dùng đổi
+     * cụm là `getAccount()` đọc sang một hình dạng khác, nên nếu chỉ ghi đè đúng cụm hiện tại
+     * thì tài khoản "sống lại" ngay sau khi chuyển cụm — đúng lỗi mà nút Xóa tài khoản từng mắc.
+     * Vì vậy xoá hết mọi hình dạng, cho cả ba cụm.
+     *
+     * `commit()` như `saveAccount()`: người dùng vừa xác nhận xoá, tiến trình có thể bị thu hồi
+     * ngay sau đó; một lần ghi bất đồng bộ bị mất sẽ để tài khoản đã "xoá" quay lại sau khi mở lại.
+     */
+    fun clearAccountEverywhere(tabIndex: Int) {
+        val editor = prefs.edit()
+
+        // Ba cụm × ba cách đặt tên mà getAccount()/saveAccount() đã dùng. distinct() để khoá
+        // "1"/"2"/"3" không bị ghi hai lần.
+        val clusterIds = listOf("1", "2", "3") +
+            listOf("Cụm 1", "Cụm 2", "Cụm 3") +
+            listOf("Cụm 1", "Cụm 2", "Cụm 3").map { getClusterKey(it) }
+        for (id in clusterIds.distinct()) {
+            editor.putString("user_cluster_${id}_tab_$tabIndex", "")
+            editor.putString("pass_cluster_${id}_tab_$tabIndex", "")
+            editor.putString("url_cluster_${id}_tab_$tabIndex", "")
+            editor.putBoolean("auto_cluster_${id}_tab_$tabIndex", false)
+        }
+
+        // Khoá của bản cũ (pref_*) và khoá trần: saveAccount() vẫn ghi chúng để bản nâng cấp
+        // không mất tài khoản, nên cũng phải xoá chúng.
+        editor.putString("$KEY_LEGACY_USER_PREFIX$tabIndex", "")
+        editor.putString("$KEY_LEGACY_PASS_PREFIX$tabIndex", "")
+        editor.putString("$KEY_LEGACY_URL_PREFIX$tabIndex", "")
+        editor.putBoolean("$KEY_LEGACY_AUTO_PREFIX$tabIndex", false)
+        editor.putString("user_tab_$tabIndex", "")
+        editor.putString("pass_tab_$tabIndex", "")
+        editor.putString("url_tab_$tabIndex", "")
+        editor.putBoolean("auto_tab_$tabIndex", false)
+
+        editor.commit()
+    }
+
     fun getRxOffset(): Long = prefs.getLong(KEY_RX_OFFSET, 0L)
     fun getTxOffset(): Long = prefs.getLong(KEY_TX_OFFSET, 0L)
 
@@ -273,6 +324,13 @@ class PreferencesManager(context: Context) {
 
     fun setUpdateBannerShownFor(value: Int) {
         prefs.edit().putInt(KEY_UPDATE_BANNER_SHOWN_FOR, value).apply()
+    }
+
+    /** `versionCode` của lần đã hiện HỘP THOẠI nhắc cập nhật khi mở app (một lần / bản). */
+    fun getUpdateDialogShownFor(): Int = prefs.getInt(KEY_UPDATE_DIALOG_SHOWN_FOR, 0)
+
+    fun setUpdateDialogShownFor(value: Int) {
+        prefs.edit().putInt(KEY_UPDATE_DIALOG_SHOWN_FOR, value).apply()
     }
 
     fun getInstallResult(): String? = prefs.getString(KEY_UPDATE_INSTALL_RESULT, null)

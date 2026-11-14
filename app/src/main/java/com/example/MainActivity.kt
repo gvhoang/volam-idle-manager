@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -34,6 +35,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,6 +44,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -158,8 +161,15 @@ fun MainScreen(
     val context = LocalContext.current
     var updateBanner by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(updateState, isSleepMode) {
-        if (isSleepMode) {
+    // Hộp thoại nhắc cập nhật khi MỞ APP (không cần mở bảng điều khiển). Khác banner 32dp:
+    // chỉ hiện một lần / versionCode, không hiện khi Treo máy, và chỉ có hai lựa chọn.
+    val foregroundTick by viewModel.foregroundTick.collectAsState()
+    var updateNoticeVersion by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(updateState, isSleepMode, updateNoticeVersion) {
+        // Hộp thoại nhắc đang mở thì không vẽ thêm banner 32dp phía sau nó. Đóng hộp thoại
+        // ("Để sau") sẽ chạy lại hiệu ứng này và banner có thể hiện — hộp thoại thì không lặp lại.
+        if (isSleepMode || updateNoticeVersion != null) {
             updateBanner = null
             return@LaunchedEffect
         }
@@ -173,6 +183,16 @@ fun MainScreen(
     // Thông điệp "đã cập nhật lên X" của process trước (kết quả cài tới muộn).
     LaunchedEffect(Unit) {
         viewModel.consumeLaunchMessage()?.let { message -> updateBanner = message }
+    }
+
+    // Xét nhắc cập nhật ở BA thời điểm: composition đầu (cold start đọc release từ cache),
+    // mỗi lần Activity resume (foregroundTick), và khi trạng thái chuyển sang Available do
+    // lần kiểm tra 3 giây sau khởi động. `takeUpdateNotice()` tự đánh dấu đã nhắc nên ba
+    // nguồn này không thể hiện hai lần cho cùng một versionCode.
+    // Treo máy thì bỏ qua và KHÔNG đánh dấu: đèn hình đang cố ý tắt.
+    LaunchedEffect(foregroundTick, updateState is UpdateUiState.Available, isSleepMode) {
+        if (isSleepMode || updateNoticeVersion != null) return@LaunchedEffect
+        viewModel.takeUpdateNotice()?.let { version -> updateNoticeVersion = version }
     }
 
     // Hẹn giờ tách riêng, key theo CHÍNH nội dung banner: nếu một hiệu ứng khác đổi banner
@@ -428,6 +448,7 @@ fun MainScreen(
                 AccountDialog(
                     accountConfig = account,
                     onSave = { updated -> viewModel.saveEditingAccount(updated) },
+                    onDelete = { deleted -> viewModel.deleteAccount(deleted.tabIndex) },
                     onDismiss = { viewModel.dismissAccountDialog() }
                 )
             }
@@ -440,6 +461,60 @@ fun MainScreen(
                     onSave = { updated -> viewModel.saveAutoConfig(updated) },
                     onResetCounters = { viewModel.resetAutoDailyCounters() },
                     onDismiss = { viewModel.dismissAutoConfigDialog() }
+                )
+            }
+
+            // Nhắc cập nhật khi mở app: đúng hai lựa chọn. "Cập nhật" đi vào luồng tải/cài
+            // hiện có trong bảng điều khiển; "Để sau" chỉ đóng hộp thoại — banner 32dp có thể
+            // nhắc lại, nhưng hộp thoại này thì không (cờ update_dialog_shown_for theo versionCode).
+            updateNoticeVersion?.let { version ->
+                AlertDialog(
+                    onDismissRequest = { updateNoticeVersion = null },
+                    containerColor = Color(0xFF1E293B),
+                    title = {
+                        Text(
+                            text = stringResource(R.string.update_notice_title, version),
+                            color = Color(0xFFE2E8F0),
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = stringResource(
+                                R.string.update_notice_body,
+                                viewModel.appVersionName
+                            ),
+                            color = Color(0xFFCBD5E1),
+                            fontSize = 11.sp
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                updateNoticeVersion = null
+                                viewModel.onUpdateNoticeAccepted()
+                            },
+                            modifier = Modifier.testTag("update_notice_update")
+                        ) {
+                            Text(
+                                text = stringResource(R.string.update_notice_update),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(
+                            onClick = { updateNoticeVersion = null },
+                            modifier = Modifier.testTag("update_notice_later")
+                        ) {
+                            Text(
+                                text = stringResource(R.string.update_notice_later),
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
                 )
             }
         }

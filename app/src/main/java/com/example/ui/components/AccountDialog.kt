@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Checkbox
@@ -19,6 +20,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -40,6 +42,7 @@ import com.example.model.AccountConfig
 fun AccountDialog(
     accountConfig: AccountConfig,
     onSave: (AccountConfig) -> Unit,
+    onDelete: (AccountConfig) -> Unit,
     onDismiss: () -> Unit
 ) {
     var username by remember { mutableStateOf(accountConfig.username) }
@@ -47,6 +50,55 @@ fun AccountDialog(
     var autoLoginEnabled by remember { mutableStateOf(accountConfig.autoLoginEnabled) }
     var customUrl by remember { mutableStateOf(accountConfig.customUrl) }
     var customUrlError by remember { mutableStateOf(false) }
+
+    // Xoá tài khoản là thao tác không hoàn tác được (mất tài khoản ở mọi cụm + đăng xuất tab),
+    // nên phải qua một lớp xác nhận. Khi đang xác nhận thì chỉ hiện hộp thoại xác nhận; "Hủy"
+    // quay lại đúng bản nháp đang sửa vì composable này không rời composition.
+    var confirmDelete by remember { mutableStateOf(false) }
+
+    if (confirmDelete) {
+        AlertDialog(
+            onDismissRequest = { confirmDelete = false },
+            containerColor = Color(0xFF1E293B),
+            title = {
+                Text(
+                    text = "Xóa tài khoản tab ${accountConfig.tabIndex + 1}?",
+                    color = Color(0xFFF87171),
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Toàn bộ thông tin đăng nhập đã lưu sẽ bị xoá; phiên đăng nhập " +
+                        "trong game cũng bị đăng xuất.",
+                    color = Color(0xFFCBD5E1),
+                    fontSize = 11.sp
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        onDelete(accountConfig)
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = Color(0xFFEF4444)),
+                    modifier = Modifier.testTag("account_delete_confirm")
+                ) {
+                    Text("Xóa tài khoản", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { confirmDelete = false },
+                    modifier = Modifier.testTag("account_delete_cancel")
+                ) {
+                    Text("Hủy", fontSize = 11.sp)
+                }
+            }
+        )
+        return
+    }
 
     Dialog(onDismissRequest = onDismiss) {
         Surface(
@@ -163,36 +215,62 @@ fun AccountDialog(
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     OutlinedButton(
-                        onClick = onDismiss,
-                        border = BorderStroke(1.dp, Color(0xFF475569)),
-                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFCBD5E1))
-                    ) {
-                        Text("Hủy", fontSize = 11.sp)
-                    }
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Button(
                         onClick = {
-                            val cleanUrl = customUrl.trim()
-                            if (cleanUrl.isNotEmpty() && !PreferencesManager.isTrustedGameUrl(cleanUrl)) {
-                                customUrlError = true
+                            // Đọc bản ĐÃ LƯU (accountConfig), không đọc ô nhập: người dùng có thể
+                            // vừa xoá trắng ô nhưng chưa bấm Lưu — tài khoản vẫn còn trong prefs
+                            // và vẫn cần được xoá. Chỉ khi cả ba trường đã trống thật thì không có
+                            // gì để xoá: đóng hộp thoại, không chạy chuỗi xoá (sẽ dựng WebView và
+                            // xoá cookie của một tab không có tài khoản).
+                            if (accountConfig.username.isBlank() &&
+                                accountConfig.password.isBlank() &&
+                                accountConfig.customUrl.isBlank()
+                            ) {
+                                onDismiss()
                             } else {
-                                onSave(
-                                    accountConfig.copy(
-                                        username = username.trim(),
-                                        password = password.trim(),
-                                        autoLoginEnabled = autoLoginEnabled,
-                                        customUrl = cleanUrl
-                                    )
-                                )
+                                confirmDelete = true
                             }
                         },
-                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
-                        modifier = Modifier.testTag("save_account_button")
+                        border = BorderStroke(1.dp, Color(0xFFEF4444)),
+                        colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFEF4444)),
+                        modifier = Modifier.testTag("account_delete_button")
                     ) {
-                        Text("Lưu cấu hình", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        Text("Xóa tài khoản", fontSize = 11.sp)
+                    }
+
+                    Row {
+                        OutlinedButton(
+                            onClick = onDismiss,
+                            border = BorderStroke(1.dp, Color(0xFF475569)),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = Color(0xFFCBD5E1))
+                        ) {
+                            Text("Hủy", fontSize = 11.sp)
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Button(
+                            onClick = {
+                                val cleanUrl = customUrl.trim()
+                                if (cleanUrl.isNotEmpty() && !PreferencesManager.isTrustedGameUrl(cleanUrl)) {
+                                    customUrlError = true
+                                } else {
+                                    onSave(
+                                        accountConfig.copy(
+                                            username = username.trim(),
+                                            password = password.trim(),
+                                            autoLoginEnabled = autoLoginEnabled,
+                                            customUrl = cleanUrl
+                                        )
+                                    )
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0284C7)),
+                            modifier = Modifier.testTag("save_account_button")
+                        ) {
+                            Text("Lưu cấu hình", fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                        }
                     }
                 }
             }

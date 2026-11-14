@@ -54,6 +54,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isSleepMode = MutableStateFlow(false)
     val isSleepMode: StateFlow<Boolean> = _isSleepMode.asStateFlow()
 
+    // Nhịp tiền cảnh: +1 ở mỗi onResume. Hộp thoại nhắc cập nhật key LaunchedEffect theo giá trị
+    // này để lần quay lại app nào cũng được xét, không chỉ lần composition đầu.
+    private val _foregroundTick = MutableStateFlow(0)
+
     // Drawer mở mặc định ở bản cũ che 89% màn hình 360dp ngay lần đầu, đúng thứ thiết kế này
     // đang cố loại bỏ. Mặc định đóng; mở bằng ô ☰ trên dải hoặc nút trong bảng điều khiển nhanh.
     private val _isSidebarVisible = MutableStateFlow(false)
@@ -260,6 +264,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         tabManager.onAccountChanged(config.tabIndex)
     }
 
+    fun deleteAccount(tabIndex: Int) {
+        // Chạm chrome: đẩy lastTouchTimeMs cho mọi slot TRƯỚC khi xoá, để vòng đăng nhập 850ms
+        // và watchdog không bấm/click tổng hợp đúng lúc trang đang bị đăng xuất.
+        tabManager.markUiInteraction()
+        // Xoá ở MỌI cụm: chỉ ghi đè cụm hiện tại thì tài khoản hiện lại ngay khi người dùng
+        // chuyển cụm (getAccount đọc một hình dạng khoá khác).
+        prefs.clearAccountEverywhere(tabIndex)
+        _editingAccount.value = null
+        tabManager.clearAccountSession(tabIndex)
+    }
+
     fun dismissAccountDialog() {
         _editingAccount.value = null
     }
@@ -314,6 +329,62 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun onActivityResumed() {
         // Kiểm lại AppOp cài đặt (không tin người dùng đã bật) + không tự cài.
         updateRepository?.onAppResumed()
+        // Mỗi lần quay lại tiền cảnh là một nhịp để MainActivity hỏi "có bản mới chưa báo không".
+        // Đây là bộ đếm, không phải cờ: hộp thoại chỉ hiện khi còn bản chưa nhắc (xem takeUpdateNotice).
+        _foregroundTick.value += 1
+    }
+
+    /**
+     * Số lần Activity resume. Compose dùng làm khoá `LaunchedEffect` để kiểm tra lại ở MỖI lần
+     * mở app / quay lại tiền cảnh, thay vì chỉ một lần lúc composition đầu.
+     */
+    val foregroundTick: StateFlow<Int> = _foregroundTick.asStateFlow()
+
+    /**
+     * Hỏi "có nên hiện hộp thoại nhắc cập nhật không" và ĐÁNH DẤU đã hiện ngay khi trả về tên bản.
+     *
+     * Chỉ trả tên khi có release mới hơn bản đang chạy ĐÃ BIẾT (đọc từ cache lúc process khởi
+     * động, hoặc từ lần kiểm tra gần nhất) và chưa từng nhắc bản đó. Nhờ đọc release đã cache,
+     * thông báo vẫn hiện được khi offline mà không phải chờ request 3 giây của vòng nền.
+     *
+     * Treo máy: không trả gì và KHÔNG đánh dấu — màn hình cố ý đen, người dùng đang cố tắt
+     * mọi thứ hiển thị; đến lần mở sau (hoặc khi thoát Treo máy) mới nhắc.
+     */
+    fun takeUpdateNotice(): String? {
+        if (_isSleepMode.value) return null
+        val repository = updateRepository ?: return null
+        if (!repository.shouldShowUpdateDialog()) return null
+        val versionName = repository.newerReleaseName() ?: return null
+        repository.markUpdateDialogShown()
+        return versionName
+    }
+
+    /**
+     * "Cập nhật" trong hộp thoại nhắc đầu phiên.
+     *
+     * Đây là cú chạm của người dùng, không phải tự động: mở bảng điều khiển nơi tiến trình
+     * tải/cài được hiển thị, rồi đi đúng luồng tải hiện có. Cài đặt vẫn là một cú chạm thứ hai
+     * trong sheet (bất biến "không tự cài" giữ nguyên).
+     */
+    fun onUpdateNoticeAccepted() {
+        openControlSheet(_selectedTabIndex.value)
+        // Nếu luồng tải/cài đã đi được một bước (APK đã verify xong, đang tải, đang chờ quyền)
+        // thì KHÔNG tải lại: bảng điều khiển đã hiện đúng nút của bước đó ("Cài đặt", "Mở cài
+        // đặt"…). Gọi download() ở đây sẽ ghi đè tệp vừa verify và đẩy người dùng lùi một bước.
+        val state = updateState.value
+        val inProgress = state is UpdateUiState.ReadyToInstall ||
+            state is UpdateUiState.Downloading ||
+            state is UpdateUiState.Verifying ||
+            state is UpdateUiState.Installing ||
+            state is UpdateUiState.NeedsPermission
+        if (inProgress) return
+
+        if (updateRepository?.hasNewerRelease() == true) {
+            viewModelScope.launch { updateRepository?.download() }
+        } else {
+            // Hiếm: cache vừa bị xoá giữa lúc hiện hộp thoại — kiểm tra lại rồi để sheet dẫn tiếp.
+            checkForUpdate()
+        }
     }
 
     fun releasesPageUrl(): String =

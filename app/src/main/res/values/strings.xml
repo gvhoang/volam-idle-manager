@@ -42,6 +42,14 @@
     <string name="cd_update_download">Tải bản cập nhật</string>
     <string name="cd_update_install">Cài bản cập nhật</string>
 
+    <!-- Nhắc cập nhật khi MỞ APP: hộp thoại, không phải banner 32dp. Tối đa một lần cho mỗi
+         versionCode (cờ update_dialog_shown_for), không hiện khi đang Treo máy. Chỉ hai nút:
+         "Cập nhật" đi vào luồng tải/cài hiện có trong bảng điều khiển, "Để sau" đóng hộp thoại. -->
+    <string name="update_notice_title">Đã có bản cập nhật %1$s</string>
+    <string name="update_notice_body">Bạn đang dùng bản %1$s. Cập nhật để nhận các sửa lỗi mới nhất, hoặc để sau.</string>
+    <string name="update_notice_update">Cập nhật</string>
+    <string name="update_notice_later">Để sau</string>
+
     <!-- Kết quả cài đặt (§5.5). Những câu trùng nguyên văn với §6.2 dùng lại
          khoá update_error_* ở trên; chỉ khai báo mới phần chưa có. -->
     <string name="update_result_success">Đã cập nhật lên %1$s.</string>

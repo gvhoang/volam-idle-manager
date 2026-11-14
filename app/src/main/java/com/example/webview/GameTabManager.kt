@@ -729,6 +729,90 @@ class GameTabManager(
         }
     }
 
+    /**
+     * Xoá phiên đăng nhập của MỘT tab: cookie + web storage của ĐÚNG profile Chromium của tab đó,
+     * rồi mới tới localStorage/sessionStorage trong trang.
+     *
+     * Không dùng `deleteProfile()`: tên profile "Isolated_Cluster_x_Tab_y" là địa chỉ tồn tại
+     * trên đĩa của tài khoản người dùng (xem QUY CHUẨN 1) — xoá profile là xoá luôn mọi thứ
+     * khác của tab, không chỉ phần đăng nhập. Chỉ xoá dữ liệu phiên bên trong profile.
+     *
+     * MULTI_PROFILE không được hỗ trợ thì TUYỆT ĐỐI không chạm vào cookie: khi đó CookieManager
+     * là kho dùng chung toàn app, `removeAllCookies()` sẽ đăng xuất mọi tab còn lại. Trên máy đó
+     * chỉ xoá được localStorage/sessionStorage — đúng giới hạn của WebView phiên bản cũ, và
+     * người dùng vẫn được đăng xuất khỏi phiên SPA đang chạy.
+     *
+     * Không reload trước khi xoá xong: `evaluateJavascript` và `removeAllCookies` đều bất đồng bộ.
+     * Tải lại ngay sẽ để trang cũ chạy tiếp bằng cookie cũ và tài khoản hiện lại.
+     *
+     * Tab kết thúc ở IDLE chứ không phải LOGGING_IN: đã xoá tài khoản thì không có gì để tự đăng
+     * nhập lại; vòng 850ms chỉ được chạy lại khi người dùng bấm ▶ mở tab.
+     */
+    fun clearAccountSession(tabIndex: Int) {
+        if (tabIndex !in webViews.indices) return
+        mainHandler.post {
+            // Profile của tab tồn tại trên đĩa cả khi tab chưa được mở trong phiên này, nhưng
+            // chỉ lấy được Profile qua một WebView. Dựng WebView rỗng của đúng slot (không
+            // loadUrl) để xoá được cookie của lần chạy trước; WebView này chính là thứ UI sẽ
+            // dùng khi người dùng bấm ▶.
+            val wv = webViews[tabIndex]
+                ?: if (tabIndex < tabCount) getOrCreateWebView(tabIndex) else null
+
+            // Dừng mọi vòng quét/inject NGAY, kể cả khi callback xoá bên dưới không bao giờ trả về.
+            isTabActive[tabIndex] = false
+            setTabState(tabIndex, TabLifecycleState.IDLE)
+            updateStatus(tabIndex, "Chờ mở tab (Idle)")
+
+            if (wv == null) {
+                // Slot đã bị thu hẹp: không còn profile nào để xoá.
+                return@post
+            }
+
+            val multiProfile = WebViewFeature.isFeatureSupported(WebViewFeature.MULTI_PROFILE)
+            // Đóng trang đúng MỘT lần, sau khi mọi lần xoá bất đồng bộ đã trả về (hoặc chốt an toàn
+            // bên dưới). Đặt lại IDLE sau khi trang bị thay: một lượt quét của trang game cũ có
+            // thể chen vào giữa lúc xoá và lúc tải about:blank và đẩy tab về IN_GAME.
+            var finished = false
+            val closePage = {
+                if (!finished) {
+                    finished = true
+                    try {
+                        wv.stopLoading()
+                        wv.loadUrl("about:blank")
+                    } catch (_: Exception) {}
+                    setTabState(tabIndex, TabLifecycleState.IDLE)
+                    updateStatus(tabIndex, "Chờ mở tab (Idle)")
+                }
+            }
+
+            // Hai lần xoá bất đồng bộ (JS + cookie). Chỉ đóng trang khi cả hai đã xong.
+            var pending = if (multiProfile) 2 else 1
+            val finish = {
+                pending--
+                if (pending <= 0) closePage()
+            }
+
+            if (multiProfile) {
+                try {
+                    val profile = WebViewCompat.getProfile(wv)
+                    profile.cookieManager.removeAllCookies { finish() }
+                    profile.webStorage.deleteAllData()
+                } catch (_: Exception) {
+                    // API có nhưng WebView của máy này không trả Profile: bỏ phần cookie,
+                    // phần localStorage bên dưới vẫn chạy — không được treo bộ đếm.
+                    finish()
+                }
+            }
+
+            wv.evaluateJavascript(GameScriptInjector.buildClearStorageScript()) { finish() }
+
+            // Chốt an toàn: renderer chết đúng lúc xoá thì callback có thể không bao giờ trả về,
+            // để lại trang game cũ chạy tiếp với phiên trong bộ nhớ. Sau 3 giây vẫn phải đóng
+            // trang. Đây chỉ là lưới hứng — đường bình thường luôn đi qua callback ở trên.
+            mainHandler.postDelayed({ closePage() }, 3_000L)
+        }
+    }
+
     // QUY CHUẨN 1: Đóng băng session riêng biệt khi đổi tài khoản
     fun onAccountChanged(tabIndex: Int) {
         if (tabIndex !in webViews.indices) return
@@ -1095,6 +1179,9 @@ class GameTabManager(
         fun onGameStateScanned(idx: Int, jsonStr: String) {
             mainHandler.post {
                 try {
+                    // Tab đã bị đóng/xoá tài khoản: trang cũ có thể kịp gọi một lượt quét cuối
+                    // trong lúc bị thay bằng about:blank. Không cho lượt đó dựng lại IN_GAME.
+                    if (!isTabActive[tabIndex]) return@post
                     if (tabIndex !in _characterStatsList.value.indices) return@post
                     val json = JSONObject(jsonStr)
                     val currentList = _characterStatsList.value.toMutableList()
@@ -1118,6 +1205,8 @@ class GameTabManager(
                         .replace("\n", " ").replace(Regex("\\s+"), " ").trim()
                     val daTau = json.optString("daTauQuest", prev.daTauQuest)
                         .replace("\n", " ").replace(Regex("\\s+"), " ").trim()
+                    val tasksCompleted = json.optString("tasksCompleted", prev.tasksCompleted)
+                        .replace("\n", " ").replace(Regex("\\s+"), " ").trim()
                     // Có log mới trong 8 giây thì giữ log đó, đừng để watchdog ghi đè.
                     val recentLog = System.currentTimeMillis() - lastGameLogAtMs[tabIndex] < gameLogStickyMs
                     val status = if (recentLog) {
@@ -1139,6 +1228,7 @@ class GameTabManager(
                         thapRecord = if (thap.isNotBlank()) thap else prev.thapRecord,
                         bossHoangKim = if (boss.isNotBlank()) boss else prev.bossHoangKim,
                         daTauQuest = if (daTau.isNotBlank()) daTau else prev.daTauQuest,
+                        tasksCompleted = if (tasksCompleted.isNotBlank()) tasksCompleted else prev.tasksCompleted,
                         lastStatus = status,
                         lastUpdateEpoch = System.currentTimeMillis()
                     )
@@ -1156,6 +1246,7 @@ class GameTabManager(
                         updated.thapRecord != prev.thapRecord ||
                         updated.bossHoangKim != prev.bossHoangKim ||
                         updated.daTauQuest != prev.daTauQuest ||
+                        updated.tasksCompleted != prev.tasksCompleted ||
                         updated.lastStatus != prev.lastStatus
                     if (changed) {
                         _characterStatsList.value = currentList

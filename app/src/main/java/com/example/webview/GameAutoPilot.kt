@@ -27,14 +27,14 @@ data class AutoConfig(
     val knbMua: Int = 0,
     val knbGiu: Int = 0,
     val qua: Boolean = true,
-    val evHb: Boolean = false,
-    val evDhb: Boolean = false,
     val khan: Boolean = true,
     val ttl: Boolean = true,
     val ttlMua: Boolean = false,
     val tt2: Boolean = true,
     val tt2Mua: Boolean = false,
-    val pb: Boolean = true
+    val pb: Boolean = true,
+    val thap: Boolean = false,
+    val doiNguyenLieu: Set<String> = emptySet()
 ) {
     fun toJson(): JSONObject {
         val o = JSONObject()
@@ -48,14 +48,18 @@ data class AutoConfig(
         o.put("knbMua", knbMua)
         o.put("knbGiu", knbGiu)
         o.put("qua", qua)
-        o.put("evHb", evHb)
-        o.put("evDhb", evDhb)
         o.put("khan", khan)
         o.put("ttl", ttl)
         o.put("ttlMua", ttlMua)
         o.put("tt2", tt2)
         o.put("tt2Mua", tt2Mua)
         o.put("pb", pb)
+        o.put("thap", thap)
+        
+        val arr = org.json.JSONArray()
+        doiNguyenLieu.forEach { arr.put(it) }
+        o.put("doiNguyenLieu", arr)
+        
         return o
     }
 
@@ -79,6 +83,14 @@ data class AutoConfig(
             } catch (_: Exception) {
                 return DEF
             }
+            val arr = o.optJSONArray("doiNguyenLieu")
+            val nguyenLieuSet = mutableSetOf<String>()
+            if (arr != null) {
+                for (i in 0 until arr.length()) {
+                    arr.optString(i)?.let { if (it.isNotBlank()) nguyenLieuSet.add(it) }
+                }
+            }
+
             return AutoConfig(
                 on = o.optBoolean("on", DEF.on),
                 dt = o.optBoolean("dt", DEF.dt),
@@ -90,14 +102,14 @@ data class AutoConfig(
                 knbMua = clamp(o.optInt("knbMua", DEF.knbMua), KNB_MUA_MAX),
                 knbGiu = clamp(o.optInt("knbGiu", DEF.knbGiu), KNB_GIU_MAX),
                 qua = o.optBoolean("qua", DEF.qua),
-                evHb = o.optBoolean("evHb", DEF.evHb),
-                evDhb = o.optBoolean("evDhb", DEF.evDhb),
                 khan = o.optBoolean("khan", DEF.khan),
                 ttl = o.optBoolean("ttl", DEF.ttl),
                 ttlMua = o.optBoolean("ttlMua", DEF.ttlMua),
                 tt2 = o.optBoolean("tt2", DEF.tt2),
                 tt2Mua = o.optBoolean("tt2Mua", DEF.tt2Mua),
-                pb = o.optBoolean("pb", DEF.pb)
+                pb = o.optBoolean("pb", DEF.pb),
+                thap = o.optBoolean("thap", DEF.thap),
+                doiNguyenLieu = nguyenLieuSet
             )
         }
 
@@ -317,7 +329,7 @@ class GameAutoPilot(
 
   var DEF = { on: false, dt: true, ldtMua: true, k2k: 0, pd: true, st: true, lbMua: 0,
     knbMua: 0, knbGiu: 0, qua: true, evHb: false, evDhb: false, khan: true, ttl: true,
-    ttlMua: false, tt2: true, tt2Mua: false, pb: true };
+    ttlMua: false, tt2: true, tt2Mua: false, pb: true, thap: false };
 
   var A = {
     cfg: Object.assign({}, DEF, CFG0 || {}),
@@ -373,9 +385,24 @@ class GameAutoPilot(
   });
 
   // ===== Bộ đếm ngày: localStorage, dạng {d:'YYYY-M-D', n:N}, trần y như bản PC =====
+  // Khoá phải kèm tên nhân vật: mọi tab cùng origin dùng chung một localStorage, nên
+  // "vlm_auto_pbx" trần sẽ khiến các tài khoản đọc chung bộ đếm của nhau (tab A xong
+  // phó bản thì tab B tưởng đã xong). Chưa biết tên thì quay về khoá cũ.
+  var dayWho = function () {
+    try {
+      if (A.st && A.st.ten) return String(A.st.ten);
+    } catch (e) {}
+    return '';
+  };
+
+  var dayKey = function (k) {
+    var who = dayWho();
+    return 'vlm_auto_' + (who ? who + '_' : '') + k;
+  };
+
   var dayGet = function (k) {
     try {
-      var o = JSON.parse(localStorage.getItem('vlm_auto_' + k) || 'null');
+      var o = JSON.parse(localStorage.getItem(dayKey(k)) || 'null');
       return o && o.d === vnDay() && isFinite(o.n) && o.n >= 0 && o.n < 1e9 ? Math.floor(o.n) : 0;
     } catch (e) { return 0; }
   };
@@ -384,7 +411,7 @@ class GameAutoPilot(
     try {
       if (!isFinite(n) || n < 0) return false;
       var max = k === 'knb' ? 1000 : k === 'evDhb' ? 1 : k === 'evHb' ? 3 : 999999999;
-      localStorage.setItem('vlm_auto_' + k,
+      localStorage.setItem(dayKey(k),
         JSON.stringify({ d: vnDay(), n: Math.min(max, dayGet(k) + Math.floor(Math.min(n, max))) }));
       return true;
     } catch (e) { return false; }
@@ -420,7 +447,7 @@ class GameAutoPilot(
     return true;
   };
 
-  // Người chơi không đụng vào tab này 60 giây: chỉ khi đó mới đổi chế độ / đi khấn / mở bảng.
+  // Người chơi không đụng vào tab này 15 giây: chỉ khi đó mới đổi chế độ / đi khấn / mở bảng.
   var ranh = function () {
     var at = Math.max(A.userAt, A.touchK || 0);
     return Date.now() - at > 60000;
@@ -522,6 +549,7 @@ class GameAutoPilot(
       if (r.login) ds.push('điểm danh');
       if (r.lv) ds.push(r.lv + ' mốc cấp');
       note('nhận quà: ' + ds.join(', '));
+      return;
     }
   }
 
@@ -608,20 +636,15 @@ class GameAutoPilot(
   }
 
   // ===== Đổi nguyên liệu thừa ở Sự kiện / Tri Ân nhà giáo =====
-  async function doiHongBao(I) {
-    var ds = [
-      ['evDhb', 4, 1, 'Đại Hồng Bao', 400],
-      ['evHb', 2, 3, 'Hồng Bao', 80]
-    ];
+  async function doiNguyenLieuThua(I) {
+    var items = A.cfg.doiNguyenLieu || [];
+    if (items.length === 0) return;
+
     var canChay = function () {
       if (!A.cfg.on || !ranh() || !A.st || A.st.o !== 'game' || Date.now() - A.stT >= 10000) return false;
       if (['phoban', 'bosstuan', 'thap'].indexOf(A.st.noi) >= 0) return false;
       if (I.dg || I.tower || I.sat || I.dead) return false;
-      for (var i = 0; i < ds.length; i++) {
-        var k = ds[i][0], max = ds[i][2];
-        if (A.cfg[k] && dayGet(k) < max) return true;
-      }
-      return false;
+      return true;
     };
     if (!canChay() || (A.cool.evHongBao > Date.now())) return;
 
@@ -633,19 +656,55 @@ class GameAutoPilot(
     var giftMo = function () {
       return !md.classList.contains('hidden') && document.querySelector('#mBody #giftTabs');
     };
-    // Chỉ tìm trong bảng quà; tuyệt đối không chạm mốc, nhận quà hay gift-code.
-    var nut = function (i) {
-      return giftMo() ? document.querySelector('#mBody [data-ng="doi:' + i + '"]') : null;
+    
+    // Khớp CHÍNH XÁC tên món: "Hồng Bao" là chuỗi con của "Đại Hồng Bao", nên so bằng
+    // includes() sẽ có ngày bấm nhầm sang món đắt hơn. Tên món nằm trong <span>, phần
+    // <small> là bộ đếm "x/y hôm nay"; bỏ <small> rồi bỏ tiền tố số lượng "N ".
+    var tenCuaHang = function (row) {
+      var span = row ? row.querySelector('span') : null;
+      if (!span) return '';
+      var txt = span.textContent || '';
+      var small = span.querySelector('small');
+      if (small && small.textContent) txt = txt.split(small.textContent).join(' ');
+      return txt.replace(/^\s*\d+\s+/, '').replace(/\s+/g, ' ').trim();
     };
-    var dem = function (b) {
-      var row = b && b.closest('.qrow');
-      var s = row && row.querySelector('small');
-      var m = s && /(?:^|[^\d.\-+])(\d+)\s*\/\s*(\d+)\s+hôm nay/.exec(s.textContent || '');
-      var n = m ? Number(m[1]) : NaN, max = m ? Number(m[2]) : NaN;
-      if (isFinite(n) && isFinite(max) && n === Math.floor(n) && max === Math.floor(max) &&
-        0 <= n && n <= max && max <= 1000) return n;
+
+    var nutTheoTen = function (ten) {
+      if (!giftMo()) return null;
+      var want = String(ten).toLowerCase();
+      var rows = document.querySelectorAll('#mBody .qrow');
+      for (var i = 0; i < rows.length; i++) {
+        var b = rows[i].querySelector('button[data-ng^="doi:"]');
+        if (!b) continue;
+        if (tenCuaHang(rows[i]).toLowerCase() === want) return b;
+      }
       return null;
     };
+
+    // Đọc bộ đếm "x/y hôm nay" của dòng; null = không đọc được thì không đoán.
+    var dem = function (b) {
+      var row = b && b.closest ? b.closest('.qrow') : null;
+      var s = row ? row.querySelector('small') : null;
+      if (!s) return null;
+      var m = /(\d+)\s*\/\s*(\d+)\s+hôm nay/.exec(s.textContent || '');
+      if (!m) return null;
+      var n = Number(m[1]), mx = Number(m[2]);
+      if (!isFinite(n) || !isFinite(mx)) return null;
+      if (n !== Math.floor(n) || mx !== Math.floor(mx)) return null;
+      if (n < 0 || n > mx || mx > 1000) return null;
+      return n;
+    };
+
+    // Phải bỏ qua nút disabled: khi mọi mốc đã xong, anyNut() vẫn true sẽ khiến auto
+    // mở/đóng bảng quà mỗi 60 giây mà không làm gì.
+    var anyNut = function () {
+      for (var i = 0; i < items.length; i++) {
+        var b = nutTheoTen(items[i]);
+        if (b && !b.disabled) return true;
+      }
+      return false;
+    };
+
     var cho = async function (tim) {
       var end = Date.now() + 2000;
       while (canChay() && !tim() && Date.now() < end) await sleep(100);
@@ -663,36 +722,37 @@ class GameAutoPilot(
       if (!tab || tab.disabled) { A.cool.evHongBao = Date.now() + 30 * 60000; return; }
       if (!canChay()) return;
       tab.click();
-      if (!await cho(function () { return nut(4) || nut(2); })) {
+      if (!await cho(anyNut)) {
         A.cool.evHongBao = Date.now() + 30 * 60000;
         return;
       }
-      // Đại Hồng Bao giá trị cao hơn: chờ RPC và bảng vẽ lại xong mới xét Hồng Bao.
-      for (var q = 0; q < ds.length; q++) {
-        var k = ds[q][0], idx = ds[q][1], max = ds[q][2], ten = ds[q][3], gia = ds[q][4];
+      
+      for (var q = 0; q < items.length; q++) {
+        var ten = items[q];
         if (!canChay()) break;
-        if (!A.cfg[k] || dayGet(k) >= max) continue;
-        var moi = await info();
-        if (!moi) break;
-        I = moi;
-        if (!canChay() || !A.cfg[k] || dayGet(k) >= max) continue;
-        var b = nut(idx);
-        if (!b) continue;
+
+        var b = nutTheoTen(ten);
         var truoc = dem(b);
-        if (truoc === null) continue;   // không đọc được bộ đếm thì không đoán thành công
-        if (truoc > dayGet(k) && !dayAdd(k, Math.min(max, truoc) - Math.min(max, dayGet(k)))) break;
-        if (b.disabled || dayGet(k) >= max) continue;
-        b.click();
-        await sleep(1500);
-        var sau = dem(nut(idx));
-        if (sau !== null && sau > truoc) {
-          if (!dayAdd(k, Math.max(0, Math.min(max, sau) - Math.min(max, dayGet(k))))) break;
-          note('đổi 1 ' + ten + ' ở sự kiện (' + gia + ' nguyên liệu)');
-        } else {
-          // RPC chậm / lỗi: không báo thành công và không gửi tiếp lệnh đổi khi chưa rõ kết quả.
-          A.cool.evHongBao = Date.now() + 30 * 60000;
-          note('sự kiện: chưa xác nhận đổi ' + ten + ', chờ kiểm tra lại');
-          break;
+        if (!b || truoc === null) continue;   // không đọc được bộ đếm thì không đoán
+
+        var count = 0;
+        while (b && !b.disabled && canChay() && count < 50) {
+          var t0 = dem(b);
+          if (t0 === null) break;
+          b.click();
+          await sleep(1500);
+          b = nutTheoTen(ten);
+          var t1 = dem(b);
+          if (t1 === null || t1 <= t0) {
+            // RPC chậm / lỗi: không báo thành công và không gửi tiếp lệnh đổi khi chưa rõ kết quả.
+            A.cool.evHongBao = Date.now() + 30 * 60000;
+            note('sự kiện: chưa xác nhận đổi ' + ten + ', chờ kiểm tra lại');
+            break;
+          }
+          count++;
+        }
+        if (count > 0) {
+          note('đã đổi ' + count + ' ' + ten + ' ở sự kiện');
         }
       }
     } finally {
@@ -934,12 +994,13 @@ class GameAutoPilot(
     var pbCon = A.cfg.pb && !pbXong();
     var dtCon = A.cfg.dt && lv >= 20 && !t.du && ((t.today | 0) < (t.max | 0) || ((I.ldt | 0) > 0 && (t.con | 0) > 0));
     var stCon = A.cfg.st && lv >= 20 && (I.lb | 0) > 0;
-    var want = pbCon ? 'dg' : ((dtCon || stCon) ? 'quest' : null);
+    var thapCon = A.cfg.thap;
+    var want = pbCon ? 'dg' : ((dtCon || stCon) ? 'quest' : (thapCon ? 'tower' : null));
     var prev = prevGet();
 
     if (want && mode !== want) {
       if (I.dg || I.tower || I.sat || I.dead || I.st) return;   // đang trong phòng ban / tháp / truy sát: chờ xong
-      if (mode === 'tower' && !prev) return;                    // người chơi tự chọn Leo Tháp: không đổi
+      if (mode === 'tower' && !prev && !thapCon) return;        // người chơi tự chọn Leo Tháp: không đổi
       if (!ranh() || !ready('mode', 60000)) return;
       var r = await api('cheDo', { m: want });
       if (r && r.ok && r.m === want) {
@@ -947,9 +1008,9 @@ class GameAutoPilot(
         A.pbOut = 0;
         note(want === 'dg'
           ? 'chuyển Chế độ Phó Bản (còn lượt phó bản)'
-          : ('chuyển Chế độ Nhiệm Vụ (' + (dtCon ? 'còn Dã Tẩu' : 'có Lệnh Bài Sát Thủ') + ')'));
+          : (want === 'quest' ? ('chuyển Chế độ Nhiệm Vụ (' + (dtCon ? 'còn Dã Tẩu' : 'có Lệnh Bài Sát Thủ') + ')') : 'chuyển Chế độ Leo Tháp'));
       }
-    } else if (!want && prev && MODE_VI[prev] && mode !== prev && (mode === 'quest' || mode === 'dg')) {
+    } else if (!want && prev && MODE_VI[prev] && mode !== prev && (mode === 'quest' || mode === 'dg' || mode === 'tower')) {
       if (I.dg || I.st || I.sat || !ranh() || !ready('mode', 60000)) return;
       var r2 = await api('cheDo', { m: prev });
       if (r2 && r2.ok && r2.m === prev) {
@@ -981,7 +1042,7 @@ class GameAutoPilot(
 
     A.busy = true;
     try {
-      var fns = [troThu, khan, tienThao, qua, daTau, muaLb, doiHongBao, muaKnb, cheDo];
+      var fns = [troThu, khan, tienThao, qua, daTau, muaLb, doiNguyenLieuThua, muaKnb, cheDo];
       for (var i = 0; i < fns.length; i++) {
         if (!A.cfg.on) break;
         var I = await info();

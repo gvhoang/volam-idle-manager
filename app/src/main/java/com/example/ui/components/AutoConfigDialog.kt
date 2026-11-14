@@ -160,18 +160,49 @@ fun AutoConfigDialog(
                     AutoCheckRow("Tự chạy phó bản: Chế độ Phó Bản tới khi hết lượt, rồi Dã Tẩu, rồi về chế độ cũ", draft.pb) {
                         draft = draft.copy(pb = it)
                     }
+                    // `thap` chỉ là lựa chọn CUỐI trong cheDo(): Phó Bản còn lượt -> Phó Bản;
+                    // còn Dã Tẩu/Lệnh Bài -> chế độ Nhiệm Vụ; hết cả hai mới tới Leo Tháp.
+                    // Nhãn phải nói đúng thứ tự đó, không hứa "tự vào lại khi chết".
+                    AutoCheckRow("Ưu tiên Leo Tháp khi hết lượt Phó Bản / Dã Tẩu", draft.thap) {
+                        draft = draft.copy(thap = it)
+                    }
                     AutoCheckRow("Nhận quà Điểm danh + Mốc cấp", draft.qua) {
                         draft = draft.copy(qua = it)
                     }
                     AutoCheckRow("Khấn tượng mỗi ngày (+20% kinh nghiệm 8 giờ)", draft.khan) {
                         draft = draft.copy(khan = it)
                     }
-                    AutoCheckRow("Sự kiện: đổi Đại Hồng Bao (100 mỗi loại, tối đa 1/ngày)", draft.evDhb) {
-                        draft = draft.copy(evDhb = it)
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        // Không còn trần ngày cố định như evHb/evDhb cũ: vòng đổi dừng khi bộ đếm
+                        // của chính game không tăng nữa (tức đã hết lượt hôm nay) và có trần an
+                        // toàn 50 lượt mỗi lần chạy. Nhãn phải nói đúng như vậy.
+                        text = "Tự động đổi nguyên liệu thừa ở Sự kiện / Tri Ân (dừng khi hết lượt):",
+                        color = Color(0xFF38BDF8),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(vertical = 4.dp)
+                    )
+
+                    val exchangeItems = listOf(
+                        "Đại Hồng Bao",
+                        "Hồng Bao",
+                        "Tiên Thảo Lộ Đặc Biệt",
+                        "Tiên Thảo Lộ",
+                        "Quế Hoa Tửu"
+                    )
+
+                    exchangeItems.forEach { item ->
+                        val isChecked = draft.doiNguyenLieu.contains(item)
+                        AutoCheckRow("  ▫ Đổi $item", isChecked) { checked ->
+                            val current = draft.doiNguyenLieu.toMutableSet()
+                            if (checked) current.add(item) else current.remove(item)
+                            draft = draft.copy(doiNguyenLieu = current)
+                        }
                     }
-                    AutoCheckRow("Sự kiện: đổi Hồng Bao (20 mỗi loại, tối đa 3/ngày)", draft.evHb) {
-                        draft = draft.copy(evHb = it)
-                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+
                     AutoCheckRow("Tiên Thảo Lộ hết thì dùng trong túi", draft.ttl) {
                         draft = draft.copy(ttl = it)
                     }
@@ -248,7 +279,7 @@ fun AutoConfigDialog(
                             )
                             Text(
                                 text = "Mua / nhận / dùng làm ngay cả khi đang chơi. Đổi chế độ, đi khấn, " +
-                                    "mua KNB và đổi Hồng Bao sự kiện chỉ khi không bấm vào tab đó 60 giây " +
+                                    "mua KNB và đổi nguyên liệu sự kiện chỉ khi không bấm vào tab đó 60 giây " +
                                     "(những việc này phải mở bảng nên sẽ che màn hình). Đang trong phó bản / " +
                                     "tháp / truy sát / đã chết thì chờ xong.",
                                 color = Color(0xFF94A3B8),

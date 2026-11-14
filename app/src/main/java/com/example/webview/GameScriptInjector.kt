@@ -1160,6 +1160,7 @@ object GameScriptInjector {
                 let thapRecord = '';
                 let bossHoangKim = '';
                 let daTauQuest = '';
+                let currentModeText = "Idle";
 
                 if (stp) {
                     if (stp.ten) charName = cleanText(String(stp.ten)).slice(0, 25);
@@ -1168,6 +1169,11 @@ object GameScriptInjector {
                     if (typeof stp.xpp === 'number' && isFinite(stp.xpp)) expPercent = String(stp.xpp) + '%';
                     if (stp.dt && stp.dt.length === 2) {
                         daTauQuest = 'Hôm nay ' + (stp.dt[0] | 0) + '/' + (stp.dt[1] | 0);
+                    }
+                    // st KHÔNG có trường m/mapTen (app.js vlmSt chỉ phát "noi"): chế độ đọc
+                    // từ #mswBtn, trạng thái thuyền đọc từ #stageLbl ở khối DOM bên dưới.
+                    if (stp.o === 'uythac') {
+                        currentModeText = "💤 Đang uỷ thác";
                     }
                 }
 
@@ -1250,6 +1256,59 @@ object GameScriptInjector {
                     if (daTauMatch) daTauQuest = cleanText(daTauMatch[1]);
                 }
 
+                // Chế độ lấy từ #mswBtn: "Chế Độ: ⚔ Luyện Công ▴" -> "⚔ Luyện Công".
+                // Trạng thái thuyền lấy từ #stageLbl: "⛵ Phong Lăng Độ".
+                if (currentModeText === "Idle" && (!stp || stp.o === 'game')) {
+                    var modeBtn = document.getElementById('mswBtn');
+                    if (modeBtn) {
+                        var modeTxt = cleanText(modeBtn.textContent || '');
+                        modeTxt = modeTxt.replace(/^Chế\s*Độ\s*:\s*/i, '').replace(/[▴▾]/g, '').trim();
+                        if (modeTxt) currentModeText = modeTxt;
+                    }
+                    var stageEl = document.getElementById('stageLbl');
+                    var stageTxt = stageEl ? cleanText(stageEl.textContent || '') : '';
+                    if (stageTxt.indexOf('⛵') >= 0 || stageTxt.indexOf('Phong Lăng') >= 0) {
+                        currentModeText = "⛵ Đang đi thuyền";
+                    }
+                }
+
+                // Không báo "Đang chạy ổn định" khi nhân vật đang ở màn đăng nhập / menu.
+                var statusMsg = '🟢 Đang chạy ổn định';
+                var stO = stp ? String(stp.o || '') : '';
+                if (stO === 'dangnhap') statusMsg = '🔑 Đang đăng nhập (chưa vào game)';
+                else if (stO === 'menu') statusMsg = '📋 Đang ở menu chọn nhân vật';
+                else if (stO === 'uythac') statusMsg = '💤 Đang uỷ thác';
+                else if (currentModeText !== "Idle") statusMsg = '🟢 ' + currentModeText;
+                
+                let tasksStr = '';
+                try {
+                    const vnDay = function () {
+                        var v = new Date(Date.now() + 7 * 3600e3);
+                        return v.getUTCFullYear() + '-' + (v.getUTCMonth() + 1) + '-' + v.getUTCDate();
+                    };
+                    // Khoá đếm kèm tên nhân vật, khớp với dayKey() trong GameAutoPilot:
+                    // mọi tab cùng origin dùng chung localStorage nên khoá trần sẽ khiến
+                    // các tài khoản đọc chung bộ đếm của nhau.
+                    const getStat = function(k) {
+                        try {
+                            var who = stp && stp.ten ? String(stp.ten) : '';
+                            var key = 'vlm_auto_' + (who ? who + '_' : '') + k;
+                            var o = JSON.parse(localStorage.getItem(key) || 'null');
+                            return o && o.d === vnDay() ? (o.n | 0) : 0;
+                        } catch(e) { return 0; }
+                    };
+                    let tasks = [];
+                    let notDone = [];
+                    let pbx = getStat('pbx'); if (pbx > 0) tasks.push('Phó bản'); else notDone.push('Phó bản');
+                    let k2k = getStat('k2k'); if (k2k > 0) tasks.push('KNB khóa');
+                    let lb = getStat('lb'); if (lb > 0) tasks.push('Lệnh Bài');
+                    let knb = getStat('knb'); if (knb > 0) tasks.push('KNB');
+                    
+                    if (tasks.length === 0) tasks.push('Chưa có');
+                    tasksStr = tasks.join(', ');
+                    if (notDone.length > 0) tasksStr += ' | Chưa xong: ' + notDone.join(', ');
+                } catch(e) {}
+
                 if (window.AndroidBridge && window.AndroidBridge.onGameStateScanned) {
                     window.AndroidBridge.onGameStateScanned(tabIdx, JSON.stringify({
                         isOnline: true,
@@ -1262,7 +1321,8 @@ object GameScriptInjector {
                         thapRecord: thapRecord,
                         bossHoangKim: bossHoangKim,
                         daTauQuest: daTauQuest,
-                        lastStatus: '🟢 Đang chạy ổn định'
+                        tasksCompleted: tasksStr,
+                        lastStatus: statusMsg
                     }));
                 }
                 return "SCANNED_SUCCESS";

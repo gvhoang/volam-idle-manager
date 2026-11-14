@@ -296,6 +296,34 @@ class UpdateRepository(
     fun hasNewerRelease(): Boolean =
         (currentRelease?.versionCode ?: 0) > BuildConfig.VERSION_CODE
 
+    /**
+     * `versionName` của bản mới hơn đang BIẾT (cache đọc lúc process khởi động, hoặc lần kiểm
+     * tra gần nhất), `null` nếu không có. Không gọi mạng: hộp thoại nhắc đầu phiên phải hiện
+     * được cả khi offline.
+     */
+    fun newerReleaseName(): String? {
+        val release = currentRelease ?: return null
+        return if (release.versionCode > BuildConfig.VERSION_CODE) release.versionName else null
+    }
+
+    /**
+     * Hộp thoại nhắc cập nhật lúc mở app: tối đa một lần cho mỗi `versionCode`.
+     *
+     * Dùng cờ riêng (`update_dialog_shown_for`), không dùng chung cờ banner: sau khi người dùng
+     * bấm "Để sau", banner 32dp vẫn được phép nhắc lại — hộp thoại thì không.
+     */
+    fun shouldShowUpdateDialog(): Boolean {
+        val versionCode = currentRelease?.versionCode ?: return false
+        return versionCode > BuildConfig.VERSION_CODE &&
+            prefs.getUpdateDialogShownFor() != versionCode
+    }
+
+    /** Đánh dấu đã nhắc bản đang thấy; gọi NGAY khi hộp thoại thực sự được hiện. */
+    fun markUpdateDialogShown() {
+        val versionCode = currentRelease?.versionCode ?: return
+        prefs.setUpdateDialogShownFor(versionCode)
+    }
+
     /** Banner đầu phiên (kết quả cài của process trước). Chỉ đọc một lần. */
     fun consumeLaunchMessage(): String? {
         val message = _launchMessage.value

@@ -8,6 +8,47 @@ Từ 5.0.0, `versionCode` theo công thức `major * 10000 + minor * 100 + patch
 
 ---
 
+## [5.2.1]
+
+### Thêm
+
+- **Thông báo khi mở app.** Nếu đã biết có bản mới (đọc từ bản lưu sẵn, không cần chờ mạng), app
+  hiện hộp thoại `Đã có bản cập nhật x.y.z` với hai lựa chọn: **Cập nhật** (mở bảng điều khiển và
+  bắt đầu tải) hoặc **Để sau**. Tối đa một lần cho mỗi `versionCode`; không hiện khi đang Treo máy.
+- Dòng trạng thái của từng thẻ tab hiển thị **chế độ đang chạy** trong game: `⚔ Luyện Công`,
+  `📜 Nhiệm Vụ`, `🏯 Phó Bản`, `🗼 Leo Tháp`, `⛵ Đang đi thuyền`, `💤 Đang uỷ thác`.
+- Bảng điều khiển có thêm mục **Hoàn thành**: các việc bộ tự động đã làm trong ngày (Phó bản,
+  KNB khoá, Lệnh Bài, KNB) và việc còn lại. Bộ đếm nay **tách theo từng nhân vật**, không còn
+  dùng chung giữa các tài khoản.
+- Tự động: tuỳ chọn **Ưu tiên Leo Tháp** (chỉ dùng khi đã hết lượt Phó Bản / Dã Tẩu) và danh
+  sách **đổi nguyên liệu thừa** ở Sự kiện / Tri Ân chọn theo tên món.
+- Xoá cấu hình tài khoản: có hộp xác nhận, xoá ở **mọi cụm**, và **đăng xuất phiên trong game**
+  (xoá cookie + dữ liệu web của riêng tab đó), sau đó tab về trạng thái `Chờ mở`.
+
+### Sửa
+
+- Cửa sổ "người chơi đang rảnh" giữ nguyên **60 giây**. Bản dev hạ xuống 15 giây, mà nhịp quét là
+  20 giây — hạ như vậy thì bộ tự động gần như chạy ngay sau mỗi lần người chơi dừng tay.
+- Bỏ đoạn "nhận quà dự phòng" bằng DOM: nó đóng hộp thoại người chơi đang mở và dùng hai selector
+  không tồn tại trong game (`data-q="login"`, `data-q="lvms"`).
+- Bỏ `reenterTower`: `cheDo` là lệnh rỗng khi đang ở đúng chế độ đó, nên nhánh này không thể vào
+  tháp mà chỉ phát thông báo sai mỗi 60 giây.
+- Đổi nguyên liệu: so **đúng tên món** thay vì khớp chuỗi con (`Hồng Bao` từng khớp cả
+  `Đại Hồng Bao`), và đọc lại bộ đếm sau mỗi lượt — không tăng thì dừng và báo chưa xác nhận,
+  thay vì bấm mù tới 100 lần.
+- `#mswBtn` cho nhãn chế độ: bỏ tiền tố `Chế Độ:` và ký tự `▴`; trạng thái đăng nhập/menu không
+  còn bị báo là "Đang chạy ổn định".
+- Khôi phục cổng phiên bản chặt (`< 990` dừng hẳn) và mốc chờ 30 giây sau khi vào game.
+
+### Đã biết
+
+- Đại Hồng Bao, Hồng Bao, kỷ lục tháp, Boss Hoàng Kim vẫn không đọc được từ giao diện game hiện
+  tại — xem [5.1.0](#510).
+- Trên máy không hỗ trợ `MULTI_PROFILE`, xoá tài khoản chỉ xoá được dữ liệu trang, **không** xoá
+  được cookie (xoá cookie khi đó sẽ đăng xuất mọi tab). App cần `MULTI_PROFILE` để chạy đúng.
+
+---
+
 ## [5.1.0]
 
 Bản này tồn tại vì **game đổi giao diện** (build 1041, bộ tài nguyên `1041h5.211`: `ui20.css`,

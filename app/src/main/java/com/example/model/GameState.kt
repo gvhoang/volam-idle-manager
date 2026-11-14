@@ -28,6 +28,7 @@ data class CharacterStats(
     val thapRecord: String = "Chưa đi",
     val bossHoangKim: String = "0",
     val daTauQuest: String = "Chưa nhận",
+    val tasksCompleted: String = "",
     val currentMode: String = "Mặc định",
     val lastStatus: String = "Chờ mở tab (Idle)",
     val lastUpdateEpoch: Long = System.currentTimeMillis()
