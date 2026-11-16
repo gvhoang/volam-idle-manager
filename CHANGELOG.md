@@ -8,6 +8,19 @@ Từ 5.0.0, `versionCode` theo công thức `major * 10000 + minor * 100 + patch
 
 ---
 
+## [5.3.1]
+
+### Sửa
+
+- **Nút hiện lại thanh điều khiển kéo được đến bất kỳ đâu.** Ở chế độ PK, cụm kỹ năng của game
+  nằm đúng chỗ nút đứng nên bị đè. Nay giữ và kéo nút được tự do; chạm (không kéo) vẫn khôi phục
+  thanh điều khiển.
+- Vị trí được lưu theo **tỉ lệ khung hình**, nên đúng lại chỗ cũ sau khi xoay màn hình, đổi mật độ
+  hiển thị, đổi số tab hoặc khởi động lại app. Nút luôn bị kẹp trong vùng nhìn thấy.
+- Vị trí mặc định (khi chưa từng kéo) giữ nguyên như 5.3.0: sát phải, cách đáy 88dp.
+
+---
+
 ## [5.3.0]
 
 ### Sửa

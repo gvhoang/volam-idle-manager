@@ -57,6 +57,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isFullScreen = MutableStateFlow(prefs.isFullScreen())
     val isFullScreen: StateFlow<Boolean> = _isFullScreen.asStateFlow()
 
+    // Vị trí nút khôi phục thanh điều khiển ở chế độ toàn màn hình: PHÂN SỐ 0f..1f của vùng
+    // vẽ được, đọc một lần từ prefs. `null` = chưa từng kéo ⇒ composable dùng vị trí mặc định.
+    // Đây là bản đọc duy nhất của vị trí: composable không giữ bản sao nào sau khi thả tay,
+    // nên không có đường nào để chỗ đang vẽ lệch chỗ đã ghi.
+    private val _fullScreenButtonPos = MutableStateFlow(prefs.getFullScreenButtonPos())
+    val fullScreenButtonPos: StateFlow<Pair<Float, Float>?> = _fullScreenButtonPos.asStateFlow()
+
     private val _isSleepMode = MutableStateFlow(false)
     val isSleepMode: StateFlow<Boolean> = _isSleepMode.asStateFlow()
 
@@ -179,6 +186,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (_isFullScreen.value == enabled) return
         _isFullScreen.value = enabled
         prefs.setFullScreen(enabled)
+    }
+
+    /**
+     * Ghi vị trí nút khôi phục sau khi kéo xong (chỉ lúc thả tay — không ghi mỗi khung hình).
+     *
+     * Nhận PHÂN SỐ của vùng vẽ được, không phải pixel: composable đã quy đổi từ pixel hiện
+     * tại, nên vị trí sống được qua xoay màn hình / đổi mật độ / đổi cỡ cửa sổ.
+     */
+    fun setFullScreenButtonPos(x: Float, y: Float) {
+        prefs.setFullScreenButtonPos(x, y)
+        // Đọc lại từ prefs thay vì sao chép tham số: giá trị đã clamp và chỉ có MỘT nguồn.
+        _fullScreenButtonPos.value = prefs.getFullScreenButtonPos()
     }
 
     // Toggle Sleep Mode (OLED black screen)

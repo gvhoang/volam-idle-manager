@@ -13,6 +13,20 @@ class PreferencesManager(context: Context) {
         private const val KEY_CLUSTER = "pref_cluster"
         private const val KEY_FPS = "pref_fps"
         private const val KEY_FULLSCREEN = "pref_fullscreen"
+
+        /**
+         * Vị trí nút khôi phục thanh điều khiển ở chế độ toàn màn hình, dạng PHÂN SỐ của
+         * vùng vẽ được: 0f = sát mép trái/trên, 1f = sát mép phải/dưới.
+         *
+         * Vì sao phân số chứ không phải pixel: cùng một chỗ đứng phải giữ nguyên khi xoay
+         * màn hình, đổi mật độ, đổi cỡ chữ hay đổi cỡ cửa sổ. Pixel lưu lại sẽ trỏ vào một
+         * điểm khác của vùng dùng được ở mọi cấu hình khác — và có thể rơi ra ngoài màn hình.
+         *
+         * Hai khoá luôn ghi cùng lúc; thiếu một khoá nghĩa là "chưa từng kéo".
+         */
+        private const val KEY_FULLSCREEN_BTN_X = "pref_fullscreen_btn_x"
+        private const val KEY_FULLSCREEN_BTN_Y = "pref_fullscreen_btn_y"
+
         private const val KEY_RX_OFFSET = "pref_rx_offset"
         private const val KEY_TX_OFFSET = "pref_tx_offset"
         private const val KEY_LEGACY_USER_PREFIX = "pref_user_tab_"
@@ -131,6 +145,41 @@ class PreferencesManager(context: Context) {
 
     fun setFullScreen(enabled: Boolean) {
         prefs.edit().putBoolean(KEY_FULLSCREEN, enabled).apply()
+    }
+
+    /**
+     * Vị trí nút khôi phục thanh điều khiển, dạng phân số của vùng vẽ được (0f..1f).
+     *
+     * `null` = chưa từng kéo ⇒ UI dùng vị trí mặc định (mép phải, cách đáy 88dp), tức đúng
+     * chỗ nút đứng trước khi kéo được. Trả `null` thay vì một cặp mặc định để phân biệt
+     * "chưa có lựa chọn của người dùng" với "người dùng kéo đúng vào góc".
+     *
+     * Clamp cả lúc ĐỌC: một cặp sửa tay qua adb/backup không được đẩy nút ra khỏi màn hình.
+     */
+    fun getFullScreenButtonPos(): Pair<Float, Float>? {
+        // Thiếu một trong hai khoá (backup khôi phục dở, ghi bị cắt) thì không đoán nửa cặp
+        // toạ độ — nút về đúng vị trí mặc định thay vì dính vào một góc.
+        if (!prefs.contains(KEY_FULLSCREEN_BTN_X) || !prefs.contains(KEY_FULLSCREEN_BTN_Y)) {
+            return null
+        }
+        return Pair(
+            prefs.getFloat(KEY_FULLSCREEN_BTN_X, 1f).coerceIn(0f, 1f),
+            prefs.getFloat(KEY_FULLSCREEN_BTN_Y, 1f).coerceIn(0f, 1f)
+        )
+    }
+
+    /**
+     * Ghi vị trí sau khi THẢ TAY (không ghi mỗi khung hình kéo).
+     *
+     * `apply()` như [setFullScreen]: đây là vị trí hiển thị, không phải dữ liệu không dựng
+     * lại được. Mất một lần ghi khi tiến trình bị thu hồi chỉ đưa nút về vị trí mặc định.
+     */
+    fun setFullScreenButtonPos(x: Float, y: Float) {
+        // Clamp cả lúc GHI để khoá trên đĩa luôn trong 0f..1f.
+        prefs.edit()
+            .putFloat(KEY_FULLSCREEN_BTN_X, x.coerceIn(0f, 1f))
+            .putFloat(KEY_FULLSCREEN_BTN_Y, y.coerceIn(0f, 1f))
+            .apply()
     }
 
     fun getAccount(tabIndex: Int, cluster: String = getCluster()): AccountConfig {
