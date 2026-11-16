@@ -12,6 +12,7 @@ class PreferencesManager(context: Context) {
     companion object {
         private const val KEY_CLUSTER = "pref_cluster"
         private const val KEY_FPS = "pref_fps"
+        private const val KEY_FULLSCREEN = "pref_fullscreen"
         private const val KEY_RX_OFFSET = "pref_rx_offset"
         private const val KEY_TX_OFFSET = "pref_tx_offset"
         private const val KEY_LEGACY_USER_PREFIX = "pref_user_tab_"
@@ -115,6 +116,21 @@ class PreferencesManager(context: Context) {
 
     fun setFps(fps: Int) {
         prefs.edit().putInt(KEY_FPS, fps).apply()
+    }
+
+    /**
+     * Chế độ toàn màn hình: dải trạng thái 32dp không được dựng, lưới game cao thêm đúng 32dp.
+     *
+     * Mặc định `false`: máy đã cài bản cũ chưa từng ghi khoá này, và một app 24/7 không được
+     * tự đổi bố cục theo hướng giấu mất thanh điều khiển của người dùng.
+     *
+     * `apply()` như [setFps] — đây là lựa chọn hiển thị, không phải dữ liệu không dựng lại được.
+     * Mất một lần ghi khi tiến trình bị thu hồi chỉ trả về trạng thái có dải, không mất gì.
+     */
+    fun isFullScreen(): Boolean = prefs.getBoolean(KEY_FULLSCREEN, false)
+
+    fun setFullScreen(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_FULLSCREEN, enabled).apply()
     }
 
     fun getAccount(tabIndex: Int, cluster: String = getCluster()): AccountConfig {

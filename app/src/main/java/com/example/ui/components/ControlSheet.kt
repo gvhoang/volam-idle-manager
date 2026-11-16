@@ -88,7 +88,7 @@ import java.util.Locale
 //   1. per-tab   ▶ Mở / PC / ↻ / ⏹   (tab đích = controlSheetTabIndex)
 //   2. view-mode 4 Dọc / 2x2 / 1 Tab
 //   3. SỐ TAB    − n +  (+ cảnh báo khi > 4, hai xác nhận)
-//   4. toggles   FPS 30↔60 / 🌙 Treo máy
+//   4. toggles   FPS 30↔60 / ⛶ Toàn màn hình / 🌙 Treo máy
 //   5. network   MB + ↓speed / reset
 //   6. sync-auto 📜 Nhiệm Vụ / ⚔️ Phó Bản / 🔥 Luyện Công  (chuyển từ drawer sang)
 //   7. app-wide  🤖 Tự động  (mở AutoConfigDialog — chuyển từ drawer sang)
@@ -118,6 +118,7 @@ fun ControlSheet(
     tabLabel: String,
     layoutMode: ViewLayoutMode,
     fps: Int,
+    isFullScreen: Boolean,
     isDesktopMode: Boolean,
     networkData: NetworkDataInfo,
     onOpenTab: () -> Unit,
@@ -126,6 +127,7 @@ fun ControlSheet(
     onStopTab: () -> Unit,
     onChangeLayoutMode: (ViewLayoutMode) -> Unit,
     onToggleFps: () -> Unit,
+    onToggleFullScreen: () -> Unit,
     onActivateSleepMode: () -> Unit,
     onOpenSidebar: () -> Unit,
     onResetNetworkStats: () -> Unit,
@@ -461,7 +463,14 @@ fun ControlSheet(
                         }
                     )
 
-                    // ---- Hàng 4: FPS + Treo máy (40dp) ----
+                    // ---- Hàng 4: FPS + Toàn màn hình + Treo máy (40dp) ----
+                    // Toàn màn hình nằm giữa FPS và Treo máy: cả ba đều là toggle hiển thị cấp
+                    // app, và đây là hàng duy nhất người dùng mở khi muốn "làm game to hơn".
+                    // Nhãn dùng stringResource (file này đã dùng cho chuỗi số tab/update) để
+                    // chuỗi dài tiếng Việt không bị chẻ đôi ở hai nơi.
+                    val fullScreenLabel = stringResource(
+                        if (isFullScreen) R.string.fullscreen_on else R.string.fullscreen_off
+                    )
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -480,6 +489,27 @@ fun ControlSheet(
                             onClick = {
                                 onInteract()
                                 onToggleFps()
+                            }
+                        )
+                        // 9.5sp thay vì 10.5sp: "⛶ Đang toàn màn hình" là nhãn dài nhất trong
+                        // dải 32dp của hàng và phải nằm chung 1/3 bề rộng với hai nhãn kia.
+                        // Giữ nguyên chữ theo spec, chỉ hạ cỡ để không bị ellipsis ở 360dp.
+                        SheetButton(
+                            label = fullScreenLabel,
+                            fill = if (isFullScreen) ChipSelectedFill else ChipIdleFill,
+                            contentColor = if (isFullScreen) Color.White else TextStrong,
+                            borderColor = if (isFullScreen) {
+                                ChipSelectedBorder
+                            } else {
+                                Color(0xFF475569)
+                            },
+                            fontSize = 9.5.sp,
+                            modifier = Modifier
+                                .weight(1f)
+                                .testTag("sheet_fullscreen_toggle"),
+                            onClick = {
+                                onInteract()
+                                onToggleFullScreen()
                             }
                         )
                         SheetButton(

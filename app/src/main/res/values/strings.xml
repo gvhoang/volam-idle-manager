@@ -70,4 +70,13 @@
     <string name="tab_count_confirm_cancel">Hủy</string>
     <string name="cd_tab_count_decrease">Giảm số tab</string>
     <string name="cd_tab_count_increase">Tăng số tab</string>
+
+    <!-- ===================================================================
+         TOÀN MÀN HÌNH — không dựng dải trạng thái 32dp, lưới game cao thêm
+         đúng 32dp. Hai nhãn toggle chia 1/3 hàng 40dp của sheet với FPS và
+         Treo máy nên phải gọn một dòng; ControlSheet hạ cỡ chữ cho nhãn này.
+         =================================================================== -->
+    <string name="fullscreen_off">⛶ Toàn màn hình</string>
+    <string name="fullscreen_on">⛶ Đang toàn màn hình</string>
+    <string name="cd_fullscreen_restore">Hiện thanh điều khiển</string>
 </resources>

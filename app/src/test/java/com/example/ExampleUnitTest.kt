@@ -68,8 +68,17 @@ class ExampleUnitTest {
     val fpsScript = com.example.webview.GameScriptInjector.buildFpsLimiterScript(30)
     assertTrue(fpsScript.contains("visibilityState"))
     assertTrue(fpsScript.contains("__isAppInBackground"))
-    assertTrue(fpsScript.contains("safeDelta"))
     assertTrue(fpsScript.contains("initSilentKeepAliveAudio"))
+    // Canh chống tái phát lỗi "tăng tốc độ đánh": shim từng giữ MỘT đồng hồ ảo dùng chung và
+    // cộng bịa +16ms cho mỗi callback trùng frame, làm game chạy nhanh 1 + 16*(N-1)/frameMs lần
+    // khi có nhiều vòng lặp rAF (1,48x ở N=2/30FPS; 1,96x ở N=2/60FPS). Nay phải truyền
+    // timestamp thật và không được tích luỹ thời gian.
+    assertFalse("Không được dùng đồng hồ ảo tích luỹ", fpsScript.contains("virtualTime"))
+    assertFalse("Không được bịa thời gian khi elapsed <= 0", fpsScript.contains("Math.max(elapsed, 16)"))
+    assertTrue(
+      "Phải truyền timestamp thật, chỉ chặn lùi",
+      fpsScript.contains("const ts = now > lastFrameTime ? now : lastFrameTime")
+    )
   }
 
   @Test

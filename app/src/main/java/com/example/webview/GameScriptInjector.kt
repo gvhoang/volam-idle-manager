@@ -1424,11 +1424,25 @@ object GameScriptInjector {
             // - Khi chuyển sang app khác (Android ngắt VSync): tự động chuyển sang bộ nhịp
             //   ngầm 20 FPS bằng setTimeout để nhân vật tiếp tục di chuyển thời gian thực,
             //   không bị dồn hàng đợi gói tin WebSocket.
-            // - Kẹp (Clamp) bước nhảy thời gian (delta time <= 50ms) để khi quay lại app
-            //   tuyệt đối KHÔNG bị tua nhanh, giật hình hay nhảy vị trí!
+            // - Chống nhảy vị trí khi quay lại app: game tự kẹp delta (e = Math.min(.25, n))
+            //   và tự giới hạn số bước mỗi khung (MAX_STEPS = 10). Shim KHÔNG kẹp nữa — xem
+            //   ghi chú ngay dưới, kẹp ở đây chính là thứ gây lỗi tua nhanh.
+            // =========================================================================
+            // MỘT đồng hồ duy nhất, lấy từ thời gian thật.
+            //
+            // Shim này dùng chung cho NHIỀU vòng lặp rAF của game (frame chính, TT_RAF của
+            // danh hiệu, chatRender, cselDraw...). Trình duyệt cấp CÙNG một timestamp cho mọi
+            // callback đăng ký trong một frame. Nếu ta tích luỹ thời gian ở đây thì callback
+            // thứ 2..N thấy elapsed == 0, rơi vào nhánh kẹp-sàn và được CỘNG BỊA
+            // 16ms mỗi lần — game chạy nhanh 1 + 16*(N-1)/frameMs lần. Đo được: 1,48x khi N=2
+            // ở 30 FPS, 1,96x khi N=2 ở 60 FPS. Đúng triệu chứng "tăng tốc độ đánh như hack".
+            //
+            // Vì vậy: truyền thẳng timestamp thật, chỉ chặn lùi. Không cộng dồn, không kẹp
+            // 50ms ở đường truyền thẳng — kẹp ở đây sẽ làm đồng hồ tụt lại vĩnh viễn sau một
+            // lần app ra nền, và game tự bù bằng cách chạy nhanh hơn (nó đã có kẹp riêng:
+            // e = Math.min(.25, n) và MAX_STEPS = 10).
             // =========================================================================
             let lastFrameTime = performance.now();
-            let virtualTime = lastFrameTime;
             const originalRAF = window.requestAnimationFrame ? window.requestAnimationFrame.bind(window) : null;
             const originalCAF = window.cancelAnimationFrame ? window.cancelAnimationFrame.bind(window) : null;
 
@@ -1457,17 +1471,14 @@ object GameScriptInjector {
                     // Dọn mọi timer còn treo TRƯỚC khi gọi callback, để không còn timer mồ côi
                     releaseHandle();
 
+                    // Timestamp thật, đơn điệu. Callback thứ 2..N trong cùng một frame nhận
+                    // đúng cùng một ts -> delta 0ms thật, không sinh ra thời gian.
                     const now = (typeof rawNow === 'number' && rawNow > 0) ? rawNow : performance.now();
-                    const elapsed = now - lastFrameTime;
-                    lastFrameTime = now;
-
-                    // Chống nhảy vị trí (Anti-Jump): Nếu vừa chuyển từ app khác về và có độ trễ lớn,
-                    // giới hạn bước tiến thời gian tối đa 50ms thay vì nhảy vọt hàng chục giây!
-                    const safeDelta = (elapsed > 0 && elapsed <= 50) ? elapsed : Math.min(Math.max(elapsed, 16), 50);
-                    virtualTime += safeDelta;
+                    const ts = now > lastFrameTime ? now : lastFrameTime;
+                    lastFrameTime = ts;
 
                     try {
-                        callback(virtualTime);
+                        callback(ts);
                     } catch(err) {}
                 }
 

@@ -51,6 +51,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _fps = MutableStateFlow(prefs.getFps())
     val fps: StateFlow<Int> = _fps.asStateFlow()
 
+    // Chế độ toàn màn hình: nguồn sự thật DUY NHẤT của cả hai chiều — dải 32dp có được dựng
+    // hay không, và nút nổi khôi phục có hiện hay không. Nút nổi chỉ gọi setFullScreen(false),
+    // nó KHÔNG giữ bản sao trạng thái nào, nên không có đường nào để dải và nút cùng biến mất.
+    private val _isFullScreen = MutableStateFlow(prefs.isFullScreen())
+    val isFullScreen: StateFlow<Boolean> = _isFullScreen.asStateFlow()
+
     private val _isSleepMode = MutableStateFlow(false)
     val isSleepMode: StateFlow<Boolean> = _isSleepMode.asStateFlow()
 
@@ -161,6 +167,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val nextFps = if (_fps.value == 60) 30 else 60
         _fps.value = nextFps
         tabManager.applyFps(nextFps)
+    }
+
+    // Toggle toàn màn hình. Một cửa duy nhất để đổi trạng thái ⇒ dải 32dp và nút khôi phục
+    // không thể lệch nhau, và prefs luôn nhận đúng giá trị đang vẽ.
+    fun toggleFullScreen() {
+        setFullScreen(!_isFullScreen.value)
+    }
+
+    fun setFullScreen(enabled: Boolean) {
+        if (_isFullScreen.value == enabled) return
+        _isFullScreen.value = enabled
+        prefs.setFullScreen(enabled)
     }
 
     // Toggle Sleep Mode (OLED black screen)

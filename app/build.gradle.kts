@@ -18,8 +18,8 @@ android {
     targetSdk = 36
     // Từ 5.0.0: versionCode = major*10000 + minor*100 + patch (5.0.0 → 50000).
     // Khớp VersionRules.versionCodeFromTag() nên tag và body release luôn cùng một con số.
-    versionCode = 50201
-    versionName = "5.2.1"
+    versionCode = 50300
+    versionName = "5.3.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

@@ -7,11 +7,14 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.viewModels
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,8 +24,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -41,10 +50,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -136,6 +149,7 @@ fun MainScreen(
     // container không phải recompose mỗi 2 giây khi số byte đổi mà tốc độ vẫn bằng 0.
     val isDownloading = hasDownloadTraffic(networkData.downloadSpeedFormatted)
     val fps by viewModel.fps.collectAsState()
+    val isFullScreen by viewModel.isFullScreen.collectAsState()
     val isSleepMode by viewModel.isSleepMode.collectAsState()
     val isSidebarVisible by viewModel.isSidebarVisible.collectAsState()
     val layoutMode by viewModel.layoutMode.collectAsState()
@@ -263,6 +277,7 @@ fun MainScreen(
                                 viewModel.tabManager.markUiInteraction()
                                 viewModel.toggleSidebar()
                             },
+                            isFullScreen = isFullScreen,
                             modifier = Modifier.fillMaxSize()
                         )
 
@@ -338,12 +353,45 @@ fun MainScreen(
                                 viewModel.tabManager.markUiInteraction()
                                 viewModel.toggleSidebar()
                             },
+                            isFullScreen = isFullScreen,
                             modifier = Modifier
                                 .weight(1f)
                                 .fillMaxHeight()
                         )
                     }
                 }
+            }
+
+            // Toàn màn hình: dải 32dp KHÔNG được dựng nên đây là đường duy nhất lấy lại
+            // thanh điều khiển. Đặt ngay sau Column game và TRƯỚC banner/sheet/OLED: nó là
+            // lớp phủ duy nhất trên game, và mọi overlay khác phải vẽ đè lên nó.
+            //
+            // Ba trạng thái ẩn, mỗi cái vì nút không được nổi trên một bề mặt khác:
+            //  • Treo máy — màn hình đó cố ý tắt mọi thứ hiển thị.
+            //  • Sheet đang mở — sheet đã có chính toggle này; nút nằm trong vùng scrim sẽ
+            //    thành một nút lơ lửng trên nền mờ (và sheet có thể thấp hơn 0.46 màn hình).
+            //  • Drawer đang mở — drawer đè 320dp từ trái; ở màn 360dp nút 36dp ở mép phải
+            //    rơi ĐÚNG lên panel drawer (drawer được vẽ trước nút trong cây view).
+            // Ẩn nút không làm kẹt ai: cả hai bề mặt đó đều có nút đóng riêng, đóng xong
+            // nút hiện lại ngay. Trạng thái toàn màn hình vẫn chỉ do ViewModel quyết định.
+            if (isFullScreen && !isSleepMode && !isControlSheetOpen && !isSidebarVisible) {
+                FullScreenRestoreButton(
+                    onClick = {
+                        // Chạm chrome: đẩy lastTouchTimeMs như mọi ô trên dải, để watchdog
+                        // không bấm tổng hợp ngay sau cú chạm này.
+                        viewModel.tabManager.markUiInteraction()
+                        viewModel.setFullScreen(false)
+                    },
+                    modifier = Modifier
+                        .align(Alignment.BottomEnd)
+                        // Đặt trong vùng game nhưng TRÊN nav bar: inset do hệ thống, không phải
+                        // chrome quản lý, nên lưới game kết thúc đúng chỗ cũ (chỉ cao thêm 32dp).
+                        .navigationBarsPadding()
+                        // 88dp: nhảy qua hàng HUD đáy của game (cần điều khiển + thanh kỹ năng
+                        // + nút ⚙ Hệ thống nằm ở đáy màn hình game — xem GameScriptInjector),
+                        // nên không đè lên pad. 8dp mép phải để góc dưới vẫn chạm được.
+                        .padding(end = 8.dp, bottom = 88.dp)
+                )
             }
 
             // Banner cập nhật: overlay 32dp ở ĐỈNH, không đẩy WebView xuống (không reflow HUD).
@@ -386,6 +434,7 @@ fun MainScreen(
                 tabLabel = sheetTabStats.characterName,
                 layoutMode = layoutMode,
                 fps = fps,
+                isFullScreen = isFullScreen,
                 isDesktopMode = desktopModeStates.getOrElse(controlSheetTabIndex) { false },
                 networkData = networkData,
                 onOpenTab = {
@@ -397,6 +446,7 @@ fun MainScreen(
                 onStopTab = { viewModel.stopSingleTab(controlSheetTabIndex) },
                 onChangeLayoutMode = { viewModel.setLayoutMode(it) },
                 onToggleFps = { viewModel.toggleFps() },
+                onToggleFullScreen = { viewModel.toggleFullScreen() },
                 onActivateSleepMode = { viewModel.setSleepMode(true) },
                 onOpenSidebar = {
                     // Drawer nằm dưới sheet trong cây view: đóng sheet trước rồi mới mở drawer.
@@ -518,5 +568,57 @@ fun MainScreen(
                 )
             }
         }
+    }
+}
+
+// =============================================================================
+// NÚT KHÔI PHỤC THANH ĐIỀU KHIỂN (chế độ toàn màn hình)
+//
+// Vì sao đúng 36dp và KHÔNG có vùng chạm nới rộng: đây là lớp phủ DUY NHẤT nằm trên
+// WebView, nên mỗi dp thừa là một dp cướp chạm của game. `clickable` gắn sau `size(36.dp)`
+// nên vùng nhận chạm đúng bằng hình vẽ; chạm ngoài nó vẫn rơi xuống WebView.
+//
+// Alpha 0.55 lúc nghỉ, 0.9 khi đang giữ: nút phải nhìn thấy được (nếu không, người dùng
+// kẹt trong chế độ toàn màn hình mà không biết đường ra) nhưng không được tranh sáng với
+// HUD của game. Đây là thứ duy nhất khiến "không có chrome" vẫn thoát ra được.
+// =============================================================================
+@Composable
+private fun FullScreenRestoreButton(
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val description = stringResource(R.string.cd_fullscreen_restore)
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
+    val alpha by animateFloatAsState(
+        targetValue = if (isPressed) 0.9f else 0.55f,
+        animationSpec = tween(durationMillis = 120),
+        label = "fullscreen_restore_alpha"
+    )
+    val shape = RoundedCornerShape(8.dp)
+
+    Box(
+        modifier = modifier
+            .size(36.dp)
+            .graphicsLayer { this.alpha = alpha }
+            .clip(shape)
+            .background(Color(0xFF0F172A))
+            .border(1.dp, Color(0xFF38BDF8), shape)
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                role = Role.Button,
+                onClick = onClick
+            )
+            .semantics { contentDescription = description }
+            .testTag("fullscreen_restore_button"),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.MoreVert,
+            contentDescription = null,
+            tint = Color(0xFF38BDF8),
+            modifier = Modifier.size(18.dp)
+        )
     }
 }

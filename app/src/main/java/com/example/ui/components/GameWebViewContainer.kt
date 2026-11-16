@@ -13,8 +13,12 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.foundation.layout.windowInsetsBottomHeight
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
@@ -52,6 +56,9 @@ fun GameWebViewContainer(
     onSelectTab: (Int) -> Unit,
     onOpenControlSheet: (Int) -> Unit = {},
     onOpenSidebar: () -> Unit = {},
+    // Toàn màn hình: dải 32dp không được dựng. Mặc định false để không đổi hành vi của
+    // bất kỳ call site nào chưa biết tới cờ này.
+    isFullScreen: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -234,19 +241,42 @@ fun GameWebViewContainer(
                 .weight(1f)
         )
 
-        // Dải trạng thái 32dp: sibling của AndroidView, KHÔNG phải overlay.
-        // Là view Compose riêng nằm dưới WebView trong Column nên không bao giờ đè lên
-        // vùng chạm của game; WebView giữ đúng bề rộng và nhận trọn phần còn lại.
-        GameStatusStrip(
-            tabManager = tabManager,
-            tabCount = tabCount,
-            characterStatsList = characterStatsList,
-            selectedTabIndex = selectedTabIndex,
-            isDownloading = isDownloading,
-            onSelectTab = onSelectTab,
-            onOpenSidebar = onOpenSidebar,
-            onOpenControlSheet = onOpenControlSheet
-        )
+        // Chân Column: hoặc dải trạng thái 32dp, hoặc một khoảng lặng chỉ giữ inset nav bar.
+        //
+        // Dải là sibling của AndroidView, KHÔNG phải overlay: nó là view Compose riêng nằm
+        // dưới WebView trong Column nên không bao giờ đè lên vùng chạm của game; WebView giữ
+        // đúng bề rộng và nhận trọn phần còn lại. Ở chế độ toàn màn hình bất biến đó còn
+        // mạnh hơn — dải không tồn tại trong cây view nên không thể ăn chạm của game.
+        if (isFullScreen) {
+            // Toàn màn hình: KHÔNG dựng dải. Ba hệ quả, cả ba đều là chủ ý:
+            //  1. AndroidView weight(1f) nhận thêm ĐÚNG chiều cao của dải (32dp ở
+            //     fontScale 1.0, theo công thức §9 trong GameStatusStrip).
+            //  2. Không còn node Compose nào chen giữa ngón tay và WebView ở đáy.
+            //  3. Không có chrome quản lý nào bị vẽ thừa.
+            //
+            // Spacer này giữ lại inset thanh điều hướng mà dải vẫn đang giữ
+            // (`navigationBarsPadding()` nằm trong GameStatusStrip). Bỏ luôn inset thì
+            // game tràn xuống dưới nav bar: lưới cao thêm 32dp + inset chứ không phải
+            // đúng 32dp, và HUD đáy của game rơi vào vùng gesture. Dùng đúng nguồn inset
+            // với dải nên hai chế độ chỉ khác nhau đúng phần dải.
+            Spacer(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .windowInsetsBottomHeight(WindowInsets.navigationBars)
+                    .testTag("fullscreen_bottom_inset")
+            )
+        } else {
+            GameStatusStrip(
+                tabManager = tabManager,
+                tabCount = tabCount,
+                characterStatsList = characterStatsList,
+                selectedTabIndex = selectedTabIndex,
+                isDownloading = isDownloading,
+                onSelectTab = onSelectTab,
+                onOpenSidebar = onOpenSidebar,
+                onOpenControlSheet = onOpenControlSheet
+            )
+        }
     }
 }
 

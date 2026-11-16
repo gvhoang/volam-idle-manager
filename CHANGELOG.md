@@ -8,6 +8,35 @@ Từ 5.0.0, `versionCode` theo công thức `major * 10000 + minor * 100 + patch
 
 ---
 
+## [5.3.0]
+
+### Sửa
+
+- **Hết lỗi "tăng tốc độ đánh như hack speed".** Nguyên nhân nằm ở bộ giới hạn FPS: nó giữ **một
+  đồng hồ ảo dùng chung** cho mọi vòng lặp `requestAnimationFrame` và cộng thêm **16ms bịa** mỗi
+  khi hai callback rơi vào cùng một khung hình. Game lấy chính mốc thời gian đó làm bước mô phỏng,
+  nên khi có N vòng lặp cùng chạy, tốc độ thành `1 + 16·(N−1)/frameMs`: **1,48× khi N=2 ở 30 FPS**,
+  **1,96× khi N=2 ở 60 FPS**.
+  Nay chỉ truyền **timestamp thật, đơn điệu**, không tích luỹ và không kẹp ở đường truyền thẳng —
+  game tự kẹp delta (`0,25s`) và tự giới hạn số bước mỗi khung.
+- Thêm unit test canh chống tái phát: script sinh ra không được chứa đồng hồ ảo hay phép cộng bịa
+  thời gian.
+
+### Thêm
+
+- **Chế độ toàn màn hình.** Bật trong bảng điều khiển nhanh (`⛶ Toàn màn hình`): dải trạng thái
+  32dp biến mất, vùng game cao thêm đúng 32dp. Một nút nhỏ 36dp ở góc dưới-phải đưa thanh điều khiển
+  trở lại; nút tự ẩn khi đang Treo máy, khi mở bảng điều khiển hoặc ngăn kéo. Trạng thái được lưu
+  qua các lần mở app.
+
+### Ghi chú
+
+- Game có cơ chế `guardNat` kiểm tra `requestAnimationFrame`/`setTimeout`/`Date.now` còn nguyên bản
+  hay không; vì app buộc phải thay `requestAnimationFrame` để giới hạn FPS, game ghi một dấu
+  `kind:"tool"` lên máy chủ (tối đa một lần mỗi 10 phút). Bản này không thay đổi bề mặt đó.
+
+---
+
 ## [5.2.1]
 
 ### Thêm
